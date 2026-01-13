@@ -116,3 +116,25 @@ export const publicRateLimiter = rateLimit({
     res.status(429).json(options.message);
   },
 });
+
+/**
+ * Rate limiter for metadata endpoints (NFT metadata)
+ * Prevents enumeration attacks and DDoS while allowing legitimate NFT marketplace access
+ * More permissive than other limiters since NFT marketplaces may need to index metadata
+ */
+export const metadataRateLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 60, // 60 requests per minute per IP (1 per second average)
+  message: {
+    success: false,
+    error: {
+      message: 'Too many metadata requests. Please slow down.',
+      code: 'RATE_LIMIT_EXCEEDED',
+    },
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    res.status(429).json(options.message);
+  },
+});

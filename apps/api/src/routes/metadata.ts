@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import { prisma } from '../db/client.js';
+import { metadataRateLimiter } from '../middleware/rateLimit.js';
 
 const router = Router();
+
+// SECURITY: Apply rate limiting to all metadata endpoints
+// This prevents enumeration attacks and DDoS while allowing NFT marketplace indexing
+router.use(metadataRateLimiter);
 
 /**
  * NFT Metadata endpoints
