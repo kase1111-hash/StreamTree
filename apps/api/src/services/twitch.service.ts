@@ -4,6 +4,7 @@
  */
 
 import crypto from 'crypto';
+import { prisma } from '../db/client.js';
 
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID || '';
 const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET || '';
@@ -39,8 +40,90 @@ interface EventSubSubscription {
   created_at: string;
 }
 
-// Store webhook secrets by subscription ID
-const webhookSecrets = new Map<string, string>();
+// In-memory cache for webhook secrets (loaded from database)
+// This cache is used for performance - secrets are persisted in the database
+// and survive server restarts
+const webhookSecretsCache = new Map<string, string>();
+let secretsCacheInitialized = false;
+
+/**
+ * Initialize the webhook secrets cache from database
+ * Called on server startup to load persisted secrets
+ */
+export async function initializeWebhookSecretsCache(): Promise<void> {
+  try {
+    const subscriptions = await prisma.twitchSubscription.findMany({
+      where: { status: 'enabled' },
+      select: { subscriptionId: true, secret: true },
+    });
+
+    webhookSecretsCache.clear();
+    for (const sub of subscriptions) {
+      webhookSecretsCache.set(sub.subscriptionId, sub.secret);
+    }
+
+    secretsCacheInitialized = true;
+    console.log(`Loaded ${subscriptions.length} Twitch webhook secrets from database`);
+  } catch (error) {
+    console.error('Failed to initialize webhook secrets cache:', error);
+  }
+}
+
+/**
+ * Get webhook secret, checking cache first then database
+ */
+async function getWebhookSecret(subscriptionId: string): Promise<string | null> {
+  // Check cache first
+  const cached = webhookSecretsCache.get(subscriptionId);
+  if (cached) return cached;
+
+  // Fall back to database
+  try {
+    const subscription = await prisma.twitchSubscription.findUnique({
+      where: { subscriptionId },
+      select: { secret: true },
+    });
+
+    if (subscription?.secret) {
+      // Update cache
+      webhookSecretsCache.set(subscriptionId, subscription.secret);
+      return subscription.secret;
+    }
+  } catch (error) {
+    console.error('Failed to fetch webhook secret from database:', error);
+  }
+
+  return null;
+}
+
+/**
+ * Get all webhook secrets from database
+ */
+async function getAllWebhookSecrets(): Promise<string[]> {
+  // If cache is initialized and has values, use it
+  if (secretsCacheInitialized && webhookSecretsCache.size > 0) {
+    return Array.from(webhookSecretsCache.values());
+  }
+
+  // Otherwise fetch from database
+  try {
+    const subscriptions = await prisma.twitchSubscription.findMany({
+      where: { status: 'enabled' },
+      select: { subscriptionId: true, secret: true },
+    });
+
+    // Update cache while we're at it
+    for (const sub of subscriptions) {
+      webhookSecretsCache.set(sub.subscriptionId, sub.secret);
+    }
+    secretsCacheInitialized = true;
+
+    return subscriptions.map(s => s.secret);
+  } catch (error) {
+    console.error('Failed to fetch webhook secrets from database:', error);
+    return [];
+  }
+}
 
 /**
  * Check if Twitch is configured
@@ -190,11 +273,13 @@ async function getAppAccessToken(): Promise<string | null> {
 
 /**
  * Create EventSub subscription
+ * @param episodeId - Optional episode ID to associate and persist the subscription
  */
 export async function createEventSubSubscription(
   type: string,
   condition: Record<string, string>,
-  version: string = '1'
+  version: string = '1',
+  episodeId?: string
 ): Promise<EventSubSubscription | null> {
   const appToken = await getAppAccessToken();
   if (!appToken) return null;
@@ -230,8 +315,26 @@ export async function createEventSubSubscription(
     const data = await response.json();
     const subscription = data.data[0];
 
-    // Store secret for verification
-    webhookSecrets.set(subscription.id, secret);
+    // Store secret in database for persistence across server restarts
+    if (episodeId) {
+      try {
+        await prisma.twitchSubscription.create({
+          data: {
+            episodeId,
+            subscriptionId: subscription.id,
+            type,
+            status: 'enabled',
+            secret, // Persisted in database
+          },
+        });
+      } catch (dbError) {
+        console.error('Failed to store Twitch subscription in database:', dbError);
+        // Continue - the subscription was created on Twitch's side
+      }
+    }
+
+    // Also cache in memory for quick access
+    webhookSecretsCache.set(subscription.id, secret);
 
     return subscription;
   } catch (error) {
@@ -260,7 +363,19 @@ export async function deleteEventSubSubscription(subscriptionId: string): Promis
     );
 
     if (response.ok) {
-      webhookSecrets.delete(subscriptionId);
+      // Remove from cache
+      webhookSecretsCache.delete(subscriptionId);
+
+      // Remove from database
+      try {
+        await prisma.twitchSubscription.delete({
+          where: { subscriptionId },
+        });
+      } catch (dbError) {
+        // May not exist in database (legacy subscriptions)
+        console.warn('Could not delete subscription from database:', dbError);
+      }
+
       return true;
     }
 
@@ -304,15 +419,16 @@ export async function listEventSubSubscriptions(): Promise<EventSubSubscription[
  * Verify EventSub webhook signature
  *
  * SECURITY: This function verifies that webhook requests genuinely come from Twitch
- * by checking the HMAC signature against stored secrets.
+ * by checking the HMAC signature against secrets stored in the database.
+ * Secrets are cached in memory for performance but persisted in DB for reliability.
  */
-export function verifyWebhookSignature(
+export async function verifyWebhookSignature(
   messageId: string,
   timestamp: string,
   body: string,
   signature: string,
   subscriptionId?: string
-): boolean {
+): Promise<boolean> {
   // Validate timestamp to prevent replay attacks (Twitch recommends 10 minute window)
   const messageTimestamp = new Date(timestamp).getTime();
   const now = Date.now();
@@ -323,18 +439,24 @@ export function verifyWebhookSignature(
     return false;
   }
 
-  // Get secrets to verify against
-  const secrets = subscriptionId
-    ? [webhookSecrets.get(subscriptionId)]
-    : Array.from(webhookSecrets.values());
+  // Get secrets to verify against (from cache or database)
+  let validSecrets: string[] = [];
 
-  // Filter out undefined/null secrets
-  const validSecrets = secrets.filter((s): s is string => !!s);
+  if (subscriptionId) {
+    // Try to get specific secret
+    const secret = await getWebhookSecret(subscriptionId);
+    if (secret) {
+      validSecrets = [secret];
+    }
+  } else {
+    // Get all secrets (for verification challenge before we know the subscription ID)
+    validSecrets = await getAllWebhookSecrets();
+  }
 
   // SECURITY: If no valid secrets exist, reject the request
   // This prevents forged webhooks when no subscriptions have been created
   if (validSecrets.length === 0) {
-    console.warn('Twitch webhook verification failed - no valid secrets stored');
+    console.warn('Twitch webhook verification failed - no valid secrets stored in database');
     return false;
   }
 
@@ -366,6 +488,7 @@ export function verifyWebhookSignature(
 
 /**
  * Setup EventSub subscriptions for an episode
+ * Subscriptions are stored in the database for persistence across server restarts
  */
 export async function setupEpisodeSubscriptions(
   twitchUserId: string,
@@ -384,10 +507,12 @@ export async function setupEpisodeSubscriptions(
   ];
 
   for (const event of eventTypes) {
+    // Pass episodeId to persist subscription secrets in database
     const subscription = await createEventSubSubscription(
       event.type,
       event.condition,
-      event.version
+      event.version,
+      episodeId
     );
 
     if (subscription) {

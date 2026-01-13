@@ -220,9 +220,9 @@ router.post('/twitch', async (req: Request, res: Response) => {
   const signature = req.headers['twitch-eventsub-message-signature'] as string;
   const messageType = req.headers['twitch-eventsub-message-type'] as string;
 
-  // Verify signature
+  // Verify signature (async - checks database for persisted secrets)
   const body = JSON.stringify(req.body);
-  if (!verifyWebhookSignature(messageId, timestamp, body, signature)) {
+  if (!await verifyWebhookSignature(messageId, timestamp, body, signature)) {
     console.error('Twitch webhook signature verification failed');
     return res.status(403).json({ error: 'Invalid signature' });
   }
