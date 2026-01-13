@@ -14,7 +14,12 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  token: string | null;
+  /**
+   * @deprecated Token is now stored in HttpOnly cookies for security.
+   * API calls will automatically include cookies via credentials: 'include'.
+   * This returns an empty string for backwards compatibility with existing API calls.
+   */
+  token: string;
   loading: boolean;
   login: (username: string) => Promise<void>;
   loginWithWallet: (address: string, signature: string, message: string) => Promise<void>;
@@ -26,120 +31,116 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-const TOKEN_KEY = 'streamtree_token';
-const REFRESH_TOKEN_KEY = 'streamtree_refresh_token';
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+/**
+ * SECURITY: This auth context now uses HttpOnly cookies for token storage
+ * instead of localStorage. This prevents XSS attacks from stealing tokens.
+ *
+ * How it works:
+ * - Login/register endpoints set HttpOnly cookies on the server
+ * - The API client includes credentials: 'include' to send cookies
+ * - Session validation uses /api/auth/me which reads cookies server-side
+ * - Logout clears cookies on the server
+ *
+ * Migration: The 'token' property has been removed from the context.
+ * API calls now rely on cookies sent automatically via credentials: 'include'.
+ */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const saveTokens = useCallback((accessToken: string, refreshToken: string) => {
-    localStorage.setItem(TOKEN_KEY, accessToken);
-    localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-    setToken(accessToken);
-  }, []);
-
-  const clearTokens = useCallback(() => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(REFRESH_TOKEN_KEY);
-    setToken(null);
-    setUser(null);
-  }, []);
-
-  const fetchUser = useCallback(async (accessToken: string) => {
+  // Check session status via HttpOnly cookies (server validates token)
+  const checkSession = useCallback(async (): Promise<User | null> => {
     try {
-      const userData = await usersApi.getMe(accessToken);
-      setUser(userData);
-    } catch (error) {
-      console.error('Failed to fetch user:', error);
-      clearTokens();
-    }
-  }, [clearTokens]);
+      const response = await fetch(`${API_URL}/api/auth/me`, {
+        credentials: 'include',
+      });
+      const data = await response.json();
 
-  const refreshUser = useCallback(async () => {
-    if (token) {
-      await fetchUser(token);
-    }
-  }, [token, fetchUser]);
-
-  // Initialize from stored token
-  useEffect(() => {
-    const initAuth = async () => {
-      const storedToken = localStorage.getItem(TOKEN_KEY);
-      const storedRefresh = localStorage.getItem(REFRESH_TOKEN_KEY);
-
-      if (storedToken) {
-        setToken(storedToken);
+      if (data.data?.needsRefresh) {
+        // Token expired, try refresh (server reads refresh token from cookie)
         try {
-          await fetchUser(storedToken);
+          await authApi.refresh('');
+          // Retry getting user
+          const retryResponse = await fetch(`${API_URL}/api/auth/me`, {
+            credentials: 'include',
+          });
+          const retryData = await retryResponse.json();
+          return retryData.data?.user || null;
         } catch {
-          // Token might be expired, try refresh
-          if (storedRefresh) {
-            try {
-              const { token: newToken, refreshToken: newRefresh } = await authApi.refresh(storedRefresh);
-              saveTokens(newToken, newRefresh);
-              await fetchUser(newToken);
-            } catch {
-              clearTokens();
-            }
-          } else {
-            clearTokens();
-          }
+          return null;
         }
       }
 
+      return data.data?.user || null;
+    } catch (error) {
+      console.error('Session check failed:', error);
+      return null;
+    }
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    const userData = await checkSession();
+    setUser(userData);
+  }, [checkSession]);
+
+  // Initialize from cookie-based session
+  useEffect(() => {
+    const initAuth = async () => {
+      const userData = await checkSession();
+      setUser(userData);
       setLoading(false);
     };
 
     initAuth();
-  }, [fetchUser, saveTokens, clearTokens]);
+  }, [checkSession]);
 
   const login = useCallback(async (username: string) => {
-    const { user: userData, token: accessToken, refreshToken } = await authApi.custodial(username);
-    saveTokens(accessToken, refreshToken);
+    // Server sets HttpOnly cookies automatically
+    const { user: userData } = await authApi.custodial(username);
     setUser(userData);
-  }, [saveTokens]);
+  }, []);
 
   const loginWithWallet = useCallback(async (address: string, signature: string, message: string) => {
-    const { user: userData, token: accessToken, refreshToken } = await authApi.wallet(address, signature, message);
-    saveTokens(accessToken, refreshToken);
+    // Server sets HttpOnly cookies automatically
+    const { user: userData } = await authApi.wallet(address, signature, message);
     setUser(userData);
-  }, [saveTokens]);
+  }, []);
 
   const logout = useCallback(async () => {
-    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
-    if (refreshToken) {
-      try {
-        await authApi.logout(refreshToken);
-      } catch {
-        // Ignore logout errors
-      }
+    try {
+      // Server clears cookies and invalidates refresh token
+      await authApi.logout('');
+    } catch {
+      // Ignore logout errors
     }
-    clearTokens();
-  }, [clearTokens]);
+    setUser(null);
+  }, []);
 
   const becomeStreamer = useCallback(async () => {
-    if (!token) throw new Error('Not authenticated');
+    if (!user) throw new Error('Not authenticated');
 
-    const { user: userData, token: newToken } = await authApi.becomeStreamer(token);
-    setToken(newToken);
-    localStorage.setItem(TOKEN_KEY, newToken);
-    setUser({ ...user!, ...userData });
-  }, [token, user]);
+    // Server updates cookie with new token containing isStreamer: true
+    const { user: userData } = await authApi.becomeStreamer('');
+    setUser({ ...user, ...userData });
+  }, [user]);
 
   const linkWallet = useCallback(async (address: string) => {
-    if (!token) throw new Error('Not authenticated');
+    if (!user) throw new Error('Not authenticated');
 
-    const updatedUser = await usersApi.linkWallet(token, address);
-    setUser({ ...user!, walletAddress: updatedUser.walletAddress });
-  }, [token, user]);
+    // Token is sent via HttpOnly cookie
+    const updatedUser = await usersApi.linkWallet('', address);
+    setUser({ ...user, walletAddress: updatedUser.walletAddress });
+  }, [user]);
 
   return (
     <AuthContext.Provider
       value={{
         user,
-        token,
+        // SECURITY: Token is now stored in HttpOnly cookies, not accessible to JS
+        // Empty string for backwards compatibility - API uses cookies via credentials: 'include'
+        token: '',
         loading,
         login,
         loginWithWallet,

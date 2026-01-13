@@ -13,6 +13,7 @@ export async function api<T>(endpoint: string, options: ApiOptions = {}): Promis
     'Content-Type': 'application/json',
   };
 
+  // Still support token header for backwards compatibility, but cookies are preferred
   if (token) {
     headers['Authorization'] = `Bearer ${token}`;
   }
@@ -21,6 +22,8 @@ export async function api<T>(endpoint: string, options: ApiOptions = {}): Promis
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
+    // SECURITY: Include credentials to send HttpOnly cookies
+    credentials: 'include',
   });
 
   const data = await response.json();
@@ -209,6 +212,8 @@ export const uploadApi = {
         Authorization: `Bearer ${token}`,
       },
       body: formData,
+      // SECURITY: Include credentials for HttpOnly cookies
+      credentials: 'include',
     });
 
     const data = await response.json();
@@ -234,6 +239,8 @@ export const uploadApi = {
         Authorization: `Bearer ${token}`,
       },
       body: formData,
+      // SECURITY: Include credentials for HttpOnly cookies
+      credentials: 'include',
     });
 
     const data = await response.json();
