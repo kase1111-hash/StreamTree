@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
+import { ConnectWalletButton } from './ConnectWallet';
 
 export function Navbar() {
   const { user, logout, loading } = useAuth();
@@ -42,6 +43,7 @@ export function Navbar() {
                 >
                   Gallery
                 </Link>
+                <ConnectWalletButton />
                 <div className="relative group">
                   <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition">
                     <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center">
@@ -49,11 +51,16 @@ export function Navbar() {
                     </div>
                     <span className="text-sm">{user.displayName || user.username}</span>
                   </button>
-                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-900 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
+                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-900 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
                     <div className="p-2">
                       <div className="px-3 py-2 text-sm text-gray-500">
                         @{user.username}
                       </div>
+                      {user.walletAddress && (
+                        <div className="px-3 py-2 text-xs text-gray-400 font-mono">
+                          {user.walletAddress.slice(0, 6)}...{user.walletAddress.slice(-4)}
+                        </div>
+                      )}
                       {!user.isStreamer && (
                         <Link
                           href="/auth/become-streamer"
@@ -73,12 +80,15 @@ export function Navbar() {
                 </div>
               </>
             ) : (
-              <Link
-                href="/auth/login"
-                className="px-4 py-2 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700 transition"
-              >
-                Sign In
-              </Link>
+              <>
+                <ConnectWalletButton />
+                <Link
+                  href="/auth/login"
+                  className="px-4 py-2 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700 transition"
+                >
+                  Sign In
+                </Link>
+              </>
             )}
           </div>
         </div>

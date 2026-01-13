@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+      "outputs": [".next/**", "!.next/cache/**", "dist/**", "artifacts/**", "typechain-types/**"]
     },
     "dev": {
       "cache": false,
@@ -28,6 +28,12 @@
     "db:studio": {
       "cache": false,
       "persistent": true
+    },
+    "compile": {
+      "outputs": ["artifacts/**", "typechain-types/**"]
+    },
+    "deploy": {
+      "cache": false
     }
   }
 }

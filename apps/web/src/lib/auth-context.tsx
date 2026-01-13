@@ -21,6 +21,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   becomeStreamer: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  linkWallet: (address: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -127,6 +128,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser({ ...user!, ...userData });
   }, [token, user]);
 
+  const linkWallet = useCallback(async (address: string) => {
+    if (!token) throw new Error('Not authenticated');
+
+    const updatedUser = await usersApi.linkWallet(token, address);
+    setUser({ ...user!, walletAddress: updatedUser.walletAddress });
+  }, [token, user]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -138,6 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         logout,
         becomeStreamer,
         refreshUser,
+        linkWallet,
       }}
     >
       {children}

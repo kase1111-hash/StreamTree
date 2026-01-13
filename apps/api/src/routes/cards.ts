@@ -4,6 +4,11 @@ import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { generateCardGrid } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats } from '../websocket/server.js';
+import {
+  isBlockchainConfigured,
+  mintBranchToken,
+  generateMetadataUri,
+} from '../services/blockchain.service.js';
 
 const router = Router();
 
@@ -128,7 +133,13 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
           orderBy: { sortOrder: 'asc' },
         },
       },
-    });
+    }) as (typeof episode & { rootTokenId?: string | null }) | null;
+
+    // Fetch rootTokenId separately for blockchain integration
+    const episodeWithRoot = episode ? await prisma.episode.findUnique({
+      where: { id: episode.id },
+      select: { rootTokenId: true },
+    }) : null;
 
     if (!episode) {
       throw new AppError('Episode not found', 404, 'NOT_FOUND');
@@ -211,10 +222,50 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
             name: true,
             artworkUrl: true,
             status: true,
+            rootTokenId: true,
           },
         },
       },
     });
+
+    // Mint branch token on blockchain if configured
+    let branchTokenId: string | null = null;
+
+    if (
+      isBlockchainConfigured() &&
+      episodeWithRoot?.rootTokenId &&
+      req.user!.walletAddress
+    ) {
+      try {
+        const metadataUri = generateMetadataUri('branch', card.id, {
+          cardId: card.id,
+          episodeId: episode.id,
+          cardNumber: card.cardNumber,
+          gridSize: episode.gridSize,
+        });
+
+        const result = await mintBranchToken(
+          episodeWithRoot.rootTokenId,
+          req.user!.walletAddress,
+          card.id,
+          metadataUri
+        );
+
+        if (result) {
+          branchTokenId = result.tokenId;
+          console.log('Branch token minted:', branchTokenId, 'tx:', result.transactionHash);
+
+          // Update card with branch token ID
+          await prisma.card.update({
+            where: { id: card.id },
+            data: { branchTokenId },
+          });
+        }
+      } catch (error) {
+        console.error('Failed to mint branch token, continuing without blockchain:', error);
+        // Continue without blockchain - don't block the card creation
+      }
+    }
 
     // Update episode stats
     await prisma.episode.update({
@@ -227,7 +278,13 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
     // Broadcast stats update
     broadcastStats(episode.id);
 
-    res.status(201).json({ success: true, data: card });
+    res.status(201).json({
+      success: true,
+      data: {
+        ...card,
+        branchTokenId,
+      },
+    });
   } catch (error) {
     next(error);
   }

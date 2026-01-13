@@ -4,6 +4,14 @@ import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
 import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats } from '../websocket/server.js';
+import {
+  isBlockchainConfigured,
+  createRootToken,
+  endRootToken,
+  batchMintFruitTokens,
+  generateMetadataUri,
+  getContractAddress,
+} from '../services/blockchain.service.js';
 
 const router = Router();
 
@@ -243,11 +251,44 @@ router.post('/:id/launch', requireStreamer, async (req: AuthenticatedRequest, re
       throw new AppError('Episode must have at least one event', 400, 'VALIDATION_ERROR');
     }
 
+    // Mint root token on blockchain if configured
+    let rootTokenId: string | null = null;
+    let contractAddress: string | null = null;
+
+    if (isBlockchainConfigured() && req.user!.walletAddress) {
+      try {
+        const metadataUri = generateMetadataUri('root', episode.id, {
+          name: episode.name,
+          artworkUrl: episode.artworkUrl,
+          gridSize: episode.gridSize,
+          maxCards: episode.maxCards,
+        });
+
+        const result = await createRootToken(
+          req.user!.walletAddress,
+          episode.id,
+          episode.maxCards || 0,
+          metadataUri
+        );
+
+        if (result) {
+          rootTokenId = result.tokenId;
+          contractAddress = getContractAddress();
+          console.log('Root token created:', rootTokenId, 'tx:', result.transactionHash);
+        }
+      } catch (error) {
+        console.error('Failed to mint root token, continuing without blockchain:', error);
+        // Continue without blockchain - don't block the launch
+      }
+    }
+
     const updated = await prisma.episode.update({
       where: { id: req.params.id },
       data: {
         status: 'live',
         launchedAt: new Date(),
+        rootTokenId,
+        contractAddress,
       },
       include: {
         eventDefinitions: {
@@ -288,6 +329,17 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
       throw new AppError('Episode is not live', 400, 'INVALID_STATUS');
     }
 
+    // End root token on blockchain if configured
+    if (isBlockchainConfigured() && episode.rootTokenId) {
+      try {
+        await endRootToken(episode.rootTokenId);
+        console.log('Root token ended:', episode.rootTokenId);
+      } catch (error) {
+        console.error('Failed to end root token:', error);
+        // Continue anyway
+      }
+    }
+
     const updated = await prisma.episode.update({
       where: { id: req.params.id },
       data: {
@@ -296,7 +348,74 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
       },
     });
 
-    // Update all cards to fruited status
+    // Get all cards with branch tokens for fruit minting
+    const cards = await prisma.card.findMany({
+      where: { episodeId: episode.id, status: 'active' },
+      include: {
+        holder: {
+          select: { walletAddress: true },
+        },
+      },
+    });
+
+    // Batch mint fruit tokens if blockchain is configured
+    if (isBlockchainConfigured() && cards.length > 0) {
+      // Filter cards that have branch tokens
+      const cardsWithBranches = cards.filter((c) => c.branchTokenId);
+
+      if (cardsWithBranches.length > 0) {
+        try {
+          // Process in batches of 50 (contract limit)
+          const BATCH_SIZE = 50;
+
+          for (let i = 0; i < cardsWithBranches.length; i += BATCH_SIZE) {
+            const batch = cardsWithBranches.slice(i, i + BATCH_SIZE);
+
+            const branchTokenIds = batch.map((c) => c.branchTokenId!);
+            const finalScores = batch.map((c) => c.markedSquares);
+            const patterns = batch.map((c) => (c.patterns as any[]).length);
+            const metadataUris = batch.map((c) =>
+              generateMetadataUri('fruit', c.id, {
+                cardId: c.id,
+                episodeId: episode.id,
+                finalScore: c.markedSquares,
+                patterns: c.patterns,
+              })
+            );
+
+            const fruitResults = await batchMintFruitTokens(
+              branchTokenIds,
+              finalScores,
+              patterns,
+              metadataUris
+            );
+
+            if (fruitResults) {
+              // Update each card with its fruit token ID
+              for (let j = 0; j < batch.length; j++) {
+                if (fruitResults[j]) {
+                  await prisma.card.update({
+                    where: { id: batch[j].id },
+                    data: {
+                      fruitTokenId: fruitResults[j].tokenId,
+                      status: 'fruited',
+                      fruitedAt: new Date(),
+                    },
+                  });
+                }
+              }
+
+              console.log(`Batch minted ${fruitResults.length} fruit tokens`);
+            }
+          }
+        } catch (error) {
+          console.error('Failed to batch mint fruit tokens:', error);
+          // Continue - update card status without blockchain tokens
+        }
+      }
+    }
+
+    // Update any remaining cards to fruited status (those without blockchain tokens)
     await prisma.card.updateMany({
       where: { episodeId: episode.id, status: 'active' },
       data: { status: 'fruited', fruitedAt: new Date() },
