@@ -1,5 +1,23 @@
 import { ethers, Contract, Wallet, JsonRpcProvider } from 'ethers';
 
+// SECURITY: Validate and protect private key
+// Private keys are extremely sensitive - never log them
+function validatePrivateKey(key: string | undefined): string | null {
+  if (!key) return null;
+
+  // Remove 0x prefix if present for validation
+  const cleanKey = key.startsWith('0x') ? key.slice(2) : key;
+
+  // Private keys should be 64 hex characters (32 bytes)
+  if (!/^[a-fA-F0-9]{64}$/.test(cleanKey)) {
+    console.error('SECURITY: L2_PRIVATE_KEY has invalid format (expected 64 hex chars)');
+    return null;
+  }
+
+  // Return with 0x prefix for ethers
+  return key.startsWith('0x') ? key : `0x${key}`;
+}
+
 // StreamTree ABI (only the functions we need)
 const STREAMTREE_ABI = [
   // Root functions
@@ -31,10 +49,13 @@ const STREAMTREE_ABI = [
   'event RootEnded(uint256 indexed rootId, uint256 branchCount, uint256 timestamp)',
 ];
 
+// SECURITY: Validate private key at module load time
+const validatedPrivateKey = validatePrivateKey(process.env.L2_PRIVATE_KEY);
+
 // Check if blockchain is configured
 const isConfigured = !!(
   process.env.L2_RPC_URL &&
-  process.env.L2_PRIVATE_KEY &&
+  validatedPrivateKey &&
   process.env.STREAMTREE_CONTRACT_ADDRESS
 );
 
@@ -45,7 +66,8 @@ let contract: Contract | null = null;
 if (isConfigured) {
   try {
     provider = new JsonRpcProvider(process.env.L2_RPC_URL);
-    wallet = new Wallet(process.env.L2_PRIVATE_KEY!, provider);
+    // SECURITY: Use validated private key, never log it
+    wallet = new Wallet(validatedPrivateKey!, provider);
     contract = new Contract(
       process.env.STREAMTREE_CONTRACT_ADDRESS!,
       STREAMTREE_ABI,
@@ -53,11 +75,19 @@ if (isConfigured) {
     );
     console.log('Blockchain service initialized');
     console.log('Contract address:', process.env.STREAMTREE_CONTRACT_ADDRESS);
+    // SECURITY: Log wallet address (safe) but NEVER the private key
+    console.log('Wallet address:', wallet.address);
   } catch (error) {
-    console.error('Failed to initialize blockchain service:', error);
+    // SECURITY: Sanitize error to prevent private key leakage
+    const sanitizedError = error instanceof Error ? error.message : 'Unknown error';
+    console.error('Failed to initialize blockchain service:', sanitizedError);
   }
 } else {
-  console.log('Blockchain service not configured - running in offline mode');
+  if (process.env.L2_PRIVATE_KEY && !validatedPrivateKey) {
+    console.error('SECURITY WARNING: L2_PRIVATE_KEY is set but invalid - blockchain disabled');
+  } else {
+    console.log('Blockchain service not configured - running in offline mode');
+  }
 }
 
 export function isBlockchainConfigured(): boolean {

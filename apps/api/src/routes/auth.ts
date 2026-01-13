@@ -6,6 +6,25 @@ import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { generateShareCode } from '@streamtree/shared';
 
+// SECURITY: Validate JWT_SECRET at module load time (fail fast)
+// This prevents the server from starting without proper configuration
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    const errorMsg = 'FATAL: JWT_SECRET environment variable is not set. Authentication cannot work.';
+    console.error(errorMsg);
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(errorMsg);
+    }
+    // In development, use a warning but allow startup for testing
+    console.warn('WARNING: Using insecure default for development only');
+    return 'INSECURE_DEV_SECRET_DO_NOT_USE_IN_PRODUCTION';
+  }
+  return secret;
+}
+
+const JWT_SECRET = getJwtSecret();
+
 // Expected message format for wallet authentication
 const AUTH_MESSAGE_PREFIX = 'Sign this message to authenticate with StreamTree:';
 
@@ -49,8 +68,7 @@ const router = Router();
 
 // Generate JWT tokens
 function generateTokens(user: { id: string; username: string; isStreamer: boolean }) {
-  const secret = process.env.JWT_SECRET!;
-  const expiresIn = process.env.JWT_EXPIRES_IN || '1h';
+  const expiresIn = (process.env.JWT_EXPIRES_IN || '1h') as jwt.SignOptions['expiresIn'];
 
   const token = jwt.sign(
     {
@@ -58,7 +76,7 @@ function generateTokens(user: { id: string; username: string; isStreamer: boolea
       username: user.username,
       isStreamer: user.isStreamer,
     },
-    secret,
+    JWT_SECRET,
     { expiresIn }
   );
 
@@ -291,7 +309,7 @@ router.post('/become-streamer', async (req, res, next) => {
     }
 
     const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { userId: string };
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
 
     const user = await prisma.user.update({
       where: { id: decoded.userId },
