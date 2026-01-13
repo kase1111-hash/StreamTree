@@ -439,13 +439,27 @@ router.get('/:id/stats', requireStreamer, async (req: AuthenticatedRequest, res,
   try {
     const episode = await prisma.episode.findUnique({
       where: { id: req.params.id },
+      include: {
+        collaborators: {
+          where: {
+            userId: req.user!.id,
+            status: 'accepted',
+          },
+        },
+      },
     });
 
     if (!episode) {
       throw new AppError('Episode not found', 404, 'NOT_FOUND');
     }
 
-    if (episode.streamerId !== req.user!.id) {
+    // Check if user is owner or collaborator with view_stats permission
+    const isOwner = episode.streamerId === req.user!.id;
+    const collaborator = episode.collaborators[0];
+    const hasViewPermission = collaborator &&
+      (collaborator.permissions as string[]).includes('view_stats');
+
+    if (!isOwner && !hasViewPermission) {
       throw new AppError('Not authorized', 403, 'FORBIDDEN');
     }
 
@@ -700,13 +714,27 @@ router.post('/:id/events/:eventId/fire', requireStreamer, async (req: Authentica
   try {
     const episode = await prisma.episode.findUnique({
       where: { id: req.params.id },
+      include: {
+        collaborators: {
+          where: {
+            userId: req.user!.id,
+            status: 'accepted',
+          },
+        },
+      },
     });
 
     if (!episode) {
       throw new AppError('Episode not found', 404, 'NOT_FOUND');
     }
 
-    if (episode.streamerId !== req.user!.id) {
+    // Check if user is owner or authorized collaborator
+    const isOwner = episode.streamerId === req.user!.id;
+    const collaborator = episode.collaborators[0];
+    const hasFirePermission = collaborator &&
+      (collaborator.permissions as string[]).includes('fire_events');
+
+    if (!isOwner && !hasFirePermission) {
       throw new AppError('Not authorized', 403, 'FORBIDDEN');
     }
 
@@ -774,11 +802,12 @@ router.post('/:id/events/:eventId/fire', requireStreamer, async (req: Authentica
     }
 
     // Record fired event
+    const firedByUser = isOwner ? 'owner' : `collaborator:${req.user!.id}`;
     const firedEvent = await prisma.firedEvent.create({
       data: {
         episodeId: episode.id,
         eventDefinitionId: event.id,
-        firedBy: 'manual',
+        firedBy: firedByUser,
         cardsAffected,
       },
     });

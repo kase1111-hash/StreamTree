@@ -252,3 +252,89 @@ export const uploadApi = {
   deleteArtwork: (episodeId: string, token: string) =>
     api(`/api/upload/artwork/${episodeId}`, { method: 'DELETE', token }),
 };
+
+// Templates
+export const templatesApi = {
+  browse: (params?: { category?: string; search?: string; sort?: string }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.category) searchParams.set('category', params.category);
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.sort) searchParams.set('sort', params.sort);
+    const query = searchParams.toString();
+    return api<{ templates: any[]; categories: string[] }>(`/api/templates/browse${query ? `?${query}` : ''}`);
+  },
+
+  getMy: (token: string) =>
+    api<any[]>('/api/templates/my', { token }),
+
+  get: (id: string, token?: string) =>
+    api<any>(`/api/templates/${id}`, { token }),
+
+  create: (
+    data: {
+      name: string;
+      description?: string;
+      category?: string;
+      events: Array<{ name: string; icon?: string; description?: string; triggerType?: string; triggerConfig?: any }>;
+      gridSize?: number;
+      isPublic?: boolean;
+    },
+    token: string
+  ) =>
+    api<any>('/api/templates', { method: 'POST', body: data, token }),
+
+  update: (id: string, data: any, token: string) =>
+    api<any>(`/api/templates/${id}`, { method: 'PATCH', body: data, token }),
+
+  delete: (id: string, token: string) =>
+    api(`/api/templates/${id}`, { method: 'DELETE', token }),
+
+  use: (id: string, data: { episodeName?: string; cardPrice?: number; maxCards?: number }, token: string) =>
+    api<any>(`/api/templates/${id}/use`, { method: 'POST', body: data, token }),
+
+  fromEpisode: (
+    episodeId: string,
+    data: { name: string; description?: string; category?: string; isPublic?: boolean },
+    token: string
+  ) =>
+    api<any>(`/api/templates/from-episode/${episodeId}`, { method: 'POST', body: data, token }),
+};
+
+// Collaborators
+export const collaboratorsApi = {
+  getForEpisode: (episodeId: string, token: string) =>
+    api<any[]>(`/api/collaborators/${episodeId}`, { token }),
+
+  invite: (
+    episodeId: string,
+    data: { username: string; role?: string; permissions?: string[]; revenueShare?: number },
+    token: string
+  ) =>
+    api<any>(`/api/collaborators/${episodeId}/invite`, { method: 'POST', body: data, token }),
+
+  getPendingInvitations: (token: string) =>
+    api<any[]>('/api/collaborators/invitations/pending', { token }),
+
+  acceptInvitation: (invitationId: string, token: string) =>
+    api<any>(`/api/collaborators/invitations/${invitationId}/accept`, { method: 'POST', token }),
+
+  declineInvitation: (invitationId: string, token: string) =>
+    api(`/api/collaborators/invitations/${invitationId}/decline`, { method: 'POST', token }),
+
+  update: (
+    episodeId: string,
+    collaboratorId: string,
+    data: { role?: string; permissions?: string[]; revenueShare?: number },
+    token: string
+  ) =>
+    api<any>(`/api/collaborators/${episodeId}/${collaboratorId}`, { method: 'PATCH', body: data, token }),
+
+  remove: (episodeId: string, collaboratorId: string, token: string) =>
+    api(`/api/collaborators/${episodeId}/${collaboratorId}`, { method: 'DELETE', token }),
+
+  leave: (episodeId: string, token: string) =>
+    api(`/api/collaborators/${episodeId}/leave`, { method: 'POST', token }),
+
+  getMyCollaborations: (token: string) =>
+    api<any[]>('/api/collaborators/my/collaborating', { token }),
+};

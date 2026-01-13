@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
-import { episodesApi } from '@/lib/api';
+import { episodesApi, templatesApi } from '@/lib/api';
 
 interface Episode {
   id: string;
@@ -16,11 +16,29 @@ interface Episode {
   endedAt: string | null;
 }
 
+const CATEGORY_OPTIONS = [
+  { value: 'general', label: 'General' },
+  { value: 'gaming', label: 'Gaming' },
+  { value: 'irl', label: 'IRL' },
+  { value: 'music', label: 'Music' },
+  { value: 'sports', label: 'Sports' },
+  { value: 'educational', label: 'Educational' },
+  { value: 'charity', label: 'Charity' },
+];
+
 export default function EpisodesPage() {
   const { user, token } = useAuth();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Save as template modal
+  const [savingEpisodeId, setSavingEpisodeId] = useState<string | null>(null);
+  const [templateName, setTemplateName] = useState('');
+  const [templateDescription, setTemplateDescription] = useState('');
+  const [templateCategory, setTemplateCategory] = useState('general');
+  const [templateIsPublic, setTemplateIsPublic] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
 
   useEffect(() => {
     if (token) {
@@ -38,6 +56,38 @@ export default function EpisodesPage() {
       setError(err.message || 'Failed to load episodes');
     }
     setLoading(false);
+  };
+
+  const openSaveAsTemplate = (episode: Episode) => {
+    setSavingEpisodeId(episode.id);
+    setTemplateName(episode.name + ' Template');
+    setTemplateDescription('');
+    setTemplateCategory('general');
+    setTemplateIsPublic(false);
+  };
+
+  const handleSaveAsTemplate = async () => {
+    if (!savingEpisodeId || !token || !templateName.trim()) return;
+
+    setSavingTemplate(true);
+    try {
+      await templatesApi.fromEpisode(
+        savingEpisodeId,
+        {
+          name: templateName.trim(),
+          description: templateDescription || undefined,
+          category: templateCategory,
+          isPublic: templateIsPublic,
+        },
+        token
+      );
+      setSavingEpisodeId(null);
+      // Show success - could use toast
+      setError('');
+    } catch (err: any) {
+      setError(err.message || 'Failed to save template');
+    }
+    setSavingTemplate(false);
   };
 
   if (!user || !user.isStreamer) {
@@ -145,12 +195,20 @@ export default function EpisodesPage() {
                     </Link>
                   )}
                   {episode.status === 'ended' && (
-                    <Link
-                      href={`/episodes/${episode.id}/results`}
-                      className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition"
-                    >
-                      Results
-                    </Link>
+                    <>
+                      <Link
+                        href={`/episodes/${episode.id}/results`}
+                        className="px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+                      >
+                        Results
+                      </Link>
+                      <button
+                        onClick={() => openSaveAsTemplate(episode)}
+                        className="px-3 py-1.5 text-sm border border-primary-300 dark:border-primary-600 text-primary-600 rounded hover:bg-primary-50 dark:hover:bg-primary-900/20 transition"
+                      >
+                        Save Template
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
@@ -164,6 +222,82 @@ export default function EpisodesPage() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Save as Template Modal */}
+      {savingEpisodeId && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-md w-full p-6">
+            <h2 className="text-xl font-bold mb-6">Save as Template</h2>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Template Name</label>
+                <input
+                  type="text"
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Description (optional)</label>
+                <textarea
+                  value={templateDescription}
+                  onChange={(e) => setTemplateDescription(e.target.value)}
+                  rows={3}
+                  placeholder="Describe this template..."
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Category</label>
+                <select
+                  value={templateCategory}
+                  onChange={(e) => setTemplateCategory(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800"
+                >
+                  {CATEGORY_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={templateIsPublic}
+                  onChange={(e) => setTemplateIsPublic(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                />
+                <span className="text-sm">Make this template public</span>
+              </label>
+              <p className="text-xs text-gray-500 ml-6">
+                Public templates can be used by other streamers
+              </p>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setSavingEpisodeId(null)}
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveAsTemplate}
+                disabled={savingTemplate || !templateName.trim()}
+                className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 transition"
+              >
+                {savingTemplate ? 'Saving...' : 'Save Template'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -29,9 +29,11 @@ model User {
   stripePayoutsEnabled  Boolean  @default(false) @map("stripe_payouts_enabled")
 
   // Relations
-  episodes    Episode[]
-  cards       Card[]
-  withdrawals Withdrawal[]
+  episodes       Episode[]
+  cards          Card[]
+  withdrawals    Withdrawal[]
+  templates      Template[]
+  collaborations EpisodeCollaborator[]
 
   @@unique([authProvider, authProviderId])
   @@map("users")
@@ -58,7 +60,7 @@ model Episode {
   shareCode       String    @unique @map("share_code")
 
   // Relations
-  streamer            User                 @relation(fields: [streamerId], references: [id])
+  streamer            User                  @relation(fields: [streamerId], references: [id])
   eventDefinitions    EventDefinition[]
   cards               Card[]
   firedEvents         FiredEvent[]
@@ -66,6 +68,7 @@ model Episode {
   customWebhooks      CustomWebhook[]
   twitchSubscriptions TwitchSubscription[]
   chatKeywords        ChatKeyword[]
+  collaborators       EpisodeCollaborator[]
 
   @@index([streamerId])
   @@index([status])
@@ -253,4 +256,50 @@ model ChatKeyword {
   @@index([episodeId])
   @@index([keyword])
   @@map("chat_keywords")
+}
+
+// Bingo Templates (reusable event presets)
+model Template {
+  id          String   @id @default(uuid())
+  creatorId   String   @map("creator_id")
+  name        String
+  description String?
+  category    String   @default("general") // gaming, irl, music, etc.
+  events      Json // Array of event definitions
+  gridSize    Int      @default(5) @map("grid_size")
+  isPublic    Boolean  @default(false) @map("is_public")
+  usageCount  Int      @default(0) @map("usage_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  creator User @relation(fields: [creatorId], references: [id])
+
+  @@index([creatorId])
+  @@index([category])
+  @@index([isPublic])
+  @@map("templates")
+}
+
+// Episode Collaborators (multi-streamer support)
+model EpisodeCollaborator {
+  id           String   @id @default(uuid())
+  episodeId    String   @map("episode_id")
+  userId       String   @map("user_id")
+  role         String   @default("co-host") // co-host, moderator
+  permissions  Json     @default("[]") // Array of permission strings: fire_events, view_stats, manage_events
+  invitedAt    DateTime @default(now()) @map("invited_at")
+  acceptedAt   DateTime? @map("accepted_at")
+  status       String   @default("pending") // pending, accepted, declined, removed
+  revenueShare Int      @default(0) @map("revenue_share") // Percentage (0-100) of revenue to share
+
+  // Relations
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([episodeId, userId])
+  @@index([episodeId])
+  @@index([userId])
+  @@index([status])
+  @@map("episode_collaborators")
 }
