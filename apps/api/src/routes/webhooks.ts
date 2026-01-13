@@ -485,16 +485,35 @@ router.post('/custom/:webhookId', async (req: Request, res: Response) => {
     return res.status(404).json({ error: 'Webhook not found or inactive' });
   }
 
-  // Verify signature if provided
-  if (signature) {
-    const body = JSON.stringify(req.body);
-    const expectedSignature =
-      'sha256=' +
-      crypto.createHmac('sha256', webhook.secret).update(body).digest('hex');
+  // SECURITY: Always require signature verification
+  // This prevents unauthorized triggering of events by anyone who knows the webhook ID
+  if (!signature) {
+    console.warn(`Custom webhook ${webhookId} called without signature`);
+    return res.status(401).json({
+      error: 'Missing signature',
+      message: 'The x-streamtree-signature header is required. Sign the request body with HMAC-SHA256 using your webhook secret.',
+    });
+  }
 
-    if (signature !== expectedSignature) {
-      return res.status(401).json({ error: 'Invalid signature' });
-    }
+  // Verify the signature using timing-safe comparison
+  const body = JSON.stringify(req.body);
+  const expectedSignature =
+    'sha256=' +
+    crypto.createHmac('sha256', webhook.secret).update(body).digest('hex');
+
+  // Use timing-safe comparison to prevent timing attacks
+  let signatureValid = false;
+  try {
+    signatureValid =
+      signature.length === expectedSignature.length &&
+      crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+  } catch {
+    signatureValid = false;
+  }
+
+  if (!signatureValid) {
+    console.warn(`Custom webhook ${webhookId} called with invalid signature`);
+    return res.status(401).json({ error: 'Invalid signature' });
   }
 
   // Check if episode is live
