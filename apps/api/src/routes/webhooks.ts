@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import Stripe from 'stripe';
 import { prisma } from '../db/client.js';
-import { stripe } from '../services/stripe.service.js';
+import { stripe, createRefund } from '../services/stripe.service.js';
 import { generateCardGrid } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats, sendToUser } from '../websocket/server.js';
 import {
@@ -94,14 +94,49 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
   }
 
   if (episode.status !== 'live') {
-    console.error('Episode not live, cannot create card');
+    console.error('Episode not live, cannot create card. Initiating refund...');
+
+    try {
+      const refundResult = await createRefund(paymentIntent.id, 'requested_by_customer');
+      console.log(`Refund initiated for non-live episode. Refund ID: ${refundResult.refundId}, Status: ${refundResult.status}`);
+
+      sendToUser(userId, {
+        type: 'payment:refunded',
+        reason: 'episode_not_live',
+        message: 'This episode is no longer accepting cards. Your payment has been refunded.',
+        refundId: refundResult.refundId,
+        episodeId,
+      });
+    } catch (refundError) {
+      console.error('Failed to refund non-live episode payment:', refundError);
+      console.error(`MANUAL_REFUND_REQUIRED: PaymentIntent ${paymentIntent.id} for episode ${episodeId} needs manual refund`);
+    }
+
     return;
   }
 
-  // Check max cards
+  // Check max cards - if sold out, refund the payment
   if (episode.maxCards && episode.cardsMinted >= episode.maxCards) {
-    console.error('Episode sold out, cannot create card');
-    // TODO: Refund the payment
+    console.error('Episode sold out, cannot create card. Initiating refund...');
+
+    try {
+      const refundResult = await createRefund(paymentIntent.id, 'episode_sold_out');
+      console.log(`Refund initiated for sold-out episode. Refund ID: ${refundResult.refundId}, Status: ${refundResult.status}`);
+
+      // Notify the user about the refund
+      sendToUser(userId, {
+        type: 'payment:refunded',
+        reason: 'episode_sold_out',
+        message: 'This episode is sold out. Your payment has been refunded.',
+        refundId: refundResult.refundId,
+        episodeId,
+      });
+    } catch (refundError) {
+      console.error('Failed to refund sold-out episode payment:', refundError);
+      // Log for manual intervention
+      console.error(`MANUAL_REFUND_REQUIRED: PaymentIntent ${paymentIntent.id} for episode ${episodeId} needs manual refund`);
+    }
+
     return;
   }
 
