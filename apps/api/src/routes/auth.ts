@@ -1,9 +1,49 @@
 import { Router } from 'express';
 import jwt from 'jsonwebtoken';
 import { v4 as uuid } from 'uuid';
+import { ethers } from 'ethers';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { generateShareCode } from '@streamtree/shared';
+
+// Expected message format for wallet authentication
+const AUTH_MESSAGE_PREFIX = 'Sign this message to authenticate with StreamTree:';
+
+/**
+ * Verify wallet signature using ethers.js
+ * Returns the recovered address if valid, null otherwise
+ */
+function verifyWalletSignature(message: string, signature: string, expectedAddress: string): boolean {
+  try {
+    // Verify message format to prevent replay attacks
+    if (!message.startsWith(AUTH_MESSAGE_PREFIX)) {
+      console.warn('Invalid auth message format');
+      return false;
+    }
+
+    // Extract and validate timestamp from message to prevent replay attacks
+    const timestampMatch = message.match(/Timestamp: (\d+)/);
+    if (timestampMatch) {
+      const timestamp = parseInt(timestampMatch[1], 10);
+      const now = Date.now();
+      const fiveMinutes = 5 * 60 * 1000;
+
+      if (Math.abs(now - timestamp) > fiveMinutes) {
+        console.warn('Auth message timestamp expired');
+        return false;
+      }
+    }
+
+    // Recover the address from the signature
+    const recoveredAddress = ethers.verifyMessage(message, signature);
+
+    // Compare addresses (case-insensitive)
+    return recoveredAddress.toLowerCase() === expectedAddress.toLowerCase();
+  } catch (error) {
+    console.error('Wallet signature verification failed:', error);
+    return false;
+  }
+}
 
 const router = Router();
 
@@ -106,8 +146,15 @@ router.post('/wallet', async (req, res, next) => {
       throw new AppError('Address, signature, and message are required', 400, 'VALIDATION_ERROR');
     }
 
-    // TODO: Verify signature in production
-    // For MVP, we'll trust the address
+    // Validate wallet address format
+    if (!ethers.isAddress(address)) {
+      throw new AppError('Invalid wallet address format', 400, 'VALIDATION_ERROR');
+    }
+
+    // Verify the signature - this proves the user owns the wallet
+    if (!verifyWalletSignature(message, signature, address)) {
+      throw new AppError('Invalid signature - wallet ownership verification failed', 401, 'INVALID_SIGNATURE');
+    }
 
     // Find or create user
     let user = await prisma.user.findUnique({

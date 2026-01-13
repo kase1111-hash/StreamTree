@@ -302,6 +302,9 @@ export async function listEventSubSubscriptions(): Promise<EventSubSubscription[
 
 /**
  * Verify EventSub webhook signature
+ *
+ * SECURITY: This function verifies that webhook requests genuinely come from Twitch
+ * by checking the HMAC signature against stored secrets.
  */
 export function verifyWebhookSignature(
   messageId: string,
@@ -310,29 +313,55 @@ export function verifyWebhookSignature(
   signature: string,
   subscriptionId?: string
 ): boolean {
-  // For verification challenge, we don't have the subscription ID yet
-  // In production, you'd store secrets differently
+  // Validate timestamp to prevent replay attacks (Twitch recommends 10 minute window)
+  const messageTimestamp = new Date(timestamp).getTime();
+  const now = Date.now();
+  const tenMinutes = 10 * 60 * 1000;
+
+  if (isNaN(messageTimestamp) || Math.abs(now - messageTimestamp) > tenMinutes) {
+    console.warn('Twitch webhook timestamp validation failed - possible replay attack');
+    return false;
+  }
+
+  // Get secrets to verify against
   const secrets = subscriptionId
     ? [webhookSecrets.get(subscriptionId)]
     : Array.from(webhookSecrets.values());
 
-  for (const secret of secrets) {
-    if (!secret) continue;
+  // Filter out undefined/null secrets
+  const validSecrets = secrets.filter((s): s is string => !!s);
 
+  // SECURITY: If no valid secrets exist, reject the request
+  // This prevents forged webhooks when no subscriptions have been created
+  if (validSecrets.length === 0) {
+    console.warn('Twitch webhook verification failed - no valid secrets stored');
+    return false;
+  }
+
+  // Try to verify against each stored secret
+  for (const secret of validSecrets) {
     const message = messageId + timestamp + body;
     const expectedSignature = 'sha256=' + crypto
       .createHmac('sha256', secret)
       .update(message)
       .digest('hex');
 
-    if (crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
-      return true;
+    // Use timing-safe comparison to prevent timing attacks
+    try {
+      if (
+        signature.length === expectedSignature.length &&
+        crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))
+      ) {
+        return true;
+      }
+    } catch {
+      // timingSafeEqual throws if buffer lengths don't match, continue to next secret
+      continue;
     }
   }
 
-  // For initial verification challenge, use a fallback
-  // This is a simplified approach - in production, handle this differently
-  return secrets.length === 0;
+  console.warn('Twitch webhook signature verification failed - no matching secret found');
+  return false;
 }
 
 /**

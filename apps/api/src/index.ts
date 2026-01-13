@@ -19,6 +19,12 @@ import { templatesRouter } from './routes/templates.js';
 import { collaboratorsRouter } from './routes/collaborators.js';
 import { errorHandler } from './middleware/error.js';
 import { authMiddleware } from './middleware/auth.js';
+import {
+  apiRateLimiter,
+  authRateLimiter,
+  publicRateLimiter,
+  paymentRateLimiter,
+} from './middleware/rateLimit.js';
 
 const app = express();
 const httpServer = createServer(app);
@@ -40,19 +46,22 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Webhook routes (no auth, signature verified)
+// Apply global API rate limiter (skips webhooks)
+app.use(apiRateLimiter);
+
+// Webhook routes (no auth, signature verified, no rate limit)
 app.use('/api/webhooks', webhooksRouter);
 
-// Public routes (no auth)
-app.use('/api/public', publicRouter);
-app.use('/api/auth', authRouter);
+// Public routes (no auth, with rate limiting)
+app.use('/api/public', publicRateLimiter, publicRouter);
+app.use('/api/auth', authRateLimiter, authRouter);
 app.use('/api/metadata', metadataRouter);
 
 // Protected routes
 app.use('/api/episodes', authMiddleware, episodesRouter);
 app.use('/api/cards', authMiddleware, cardsRouter);
 app.use('/api/users', authMiddleware, usersRouter);
-app.use('/api/payments', authMiddleware, paymentsRouter);
+app.use('/api/payments', authMiddleware, paymentRateLimiter, paymentsRouter);
 app.use('/api/upload', authMiddleware, uploadRouter);
 app.use('/api/twitch', authMiddleware, twitchRouter);
 app.use('/api/automation', authMiddleware, automationRouter);
