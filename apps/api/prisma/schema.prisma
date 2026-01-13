@@ -226,6 +226,7 @@ model TwitchSubscription {
   subscriptionId String   @unique @map("subscription_id") // Twitch subscription ID
   type           String // e.g., "channel.follow", "channel.cheer"
   status         String   @default("pending") // pending, enabled, revoked
+  secret         String   // Webhook verification secret (persisted in DB for server restarts)
   createdAt      DateTime @default(now()) @map("created_at")
 
   // Relations
