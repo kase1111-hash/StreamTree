@@ -1,0 +1,146 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Users
+model User {
+  id                  String   @id @default(uuid())
+  walletAddress       String?  @unique @map("wallet_address")
+  custodialWalletId   String?  @map("custodial_wallet_id")
+  username            String   @unique
+  displayName         String?  @map("display_name")
+  avatarUrl           String?  @map("avatar_url")
+  authProvider        String   @map("auth_provider")
+  authProviderId      String   @map("auth_provider_id")
+  isStreamer          Boolean  @default(false) @map("is_streamer")
+  twitchId            String?  @map("twitch_id")
+  twitchAccessToken   String?  @map("twitch_access_token")
+  createdAt           DateTime @default(now()) @map("created_at")
+  lastActiveAt        DateTime @default(now()) @map("last_active_at")
+
+  // Relations
+  episodes Episode[]
+  cards    Card[]
+
+  @@unique([authProvider, authProviderId])
+  @@map("users")
+}
+
+// Episodes (Roots)
+model Episode {
+  id              String    @id @default(uuid())
+  streamerId      String    @map("streamer_id")
+  name            String
+  artworkUrl      String?   @map("artwork_url")
+  artworkHash     String?   @map("artwork_hash")
+  cardPrice       Int       @default(0) @map("card_price")
+  maxCards        Int?      @map("max_cards")
+  gridSize        Int       @default(5) @map("grid_size")
+  status          String    @default("draft")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  launchedAt      DateTime? @map("launched_at")
+  endedAt         DateTime? @map("ended_at")
+  cardsMinted     Int       @default(0) @map("cards_minted")
+  totalRevenue    Int       @default(0) @map("total_revenue")
+  contractAddress String?   @map("contract_address")
+  rootTokenId     String?   @map("root_token_id")
+  shareCode       String    @unique @map("share_code")
+
+  // Relations
+  streamer         User              @relation(fields: [streamerId], references: [id])
+  eventDefinitions EventDefinition[]
+  cards            Card[]
+  firedEvents      FiredEvent[]
+
+  @@index([streamerId])
+  @@index([status])
+  @@index([shareCode])
+  @@map("episodes")
+}
+
+// Event Definitions
+model EventDefinition {
+  id            String    @id @default(uuid())
+  episodeId     String    @map("episode_id")
+  name          String
+  icon          String    @default("🎯")
+  description   String?
+  triggerType   String    @default("manual") @map("trigger_type")
+  triggerConfig Json?     @map("trigger_config")
+  firedAt       DateTime? @map("fired_at")
+  firedCount    Int       @default(0) @map("fired_count")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  sortOrder     Int       @default(0) @map("sort_order")
+
+  // Relations
+  episode     Episode      @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  firedEvents FiredEvent[]
+
+  @@index([episodeId])
+  @@map("event_definitions")
+}
+
+// Cards (Branches)
+model Card {
+  id            String    @id @default(uuid())
+  episodeId     String    @map("episode_id")
+  holderId      String    @map("holder_id")
+  grid          Json
+  status        String    @default("active")
+  markedSquares Int       @default(0) @map("marked_squares")
+  patterns      Json      @default("[]")
+  mintedAt      DateTime  @default(now()) @map("minted_at")
+  fruitedAt     DateTime? @map("fruited_at")
+  paymentId     String?   @map("payment_id")
+  pricePaid     Int       @default(0) @map("price_paid")
+  branchTokenId String?   @map("branch_token_id")
+  fruitTokenId  String?   @map("fruit_token_id")
+  cardNumber    Int       @map("card_number")
+
+  // Relations
+  episode Episode @relation(fields: [episodeId], references: [id])
+  holder  User    @relation(fields: [holderId], references: [id])
+
+  @@unique([episodeId, holderId])
+  @@index([episodeId])
+  @@index([holderId])
+  @@index([status])
+  @@map("cards")
+}
+
+// Fired Events Log
+model FiredEvent {
+  id                String   @id @default(uuid())
+  episodeId         String   @map("episode_id")
+  eventDefinitionId String   @map("event_definition_id")
+  firedAt           DateTime @default(now()) @map("fired_at")
+  firedBy           String   @map("fired_by")
+  cardsAffected     Int      @default(0) @map("cards_affected")
+  triggerData       Json?    @map("trigger_data")
+
+  // Relations
+  episode         Episode         @relation(fields: [episodeId], references: [id])
+  eventDefinition EventDefinition @relation(fields: [eventDefinitionId], references: [id])
+
+  @@index([episodeId])
+  @@index([firedAt])
+  @@map("fired_events")
+}
+
+// Refresh Tokens
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@index([token])
+  @@map("refresh_tokens")
+}
