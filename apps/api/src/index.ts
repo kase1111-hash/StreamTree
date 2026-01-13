@@ -13,6 +13,8 @@ import { webhooksRouter } from './routes/webhooks.js';
 import { paymentsRouter } from './routes/payments.js';
 import { uploadRouter } from './routes/upload.js';
 import { metadataRouter } from './routes/metadata.js';
+import { twitchRouter } from './routes/twitch.js';
+import { automationRouter } from './routes/automation.js';
 import { errorHandler } from './middleware/error.js';
 import { authMiddleware } from './middleware/auth.js';
 
@@ -50,6 +52,8 @@ app.use('/api/cards', authMiddleware, cardsRouter);
 app.use('/api/users', authMiddleware, usersRouter);
 app.use('/api/payments', authMiddleware, paymentsRouter);
 app.use('/api/upload', authMiddleware, uploadRouter);
+app.use('/api/twitch', authMiddleware, twitchRouter);
+app.use('/api/automation', authMiddleware, automationRouter);
 
 // Error handler
 app.use(errorHandler);

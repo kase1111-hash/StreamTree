@@ -58,11 +58,14 @@ model Episode {
   shareCode       String    @unique @map("share_code")
 
   // Relations
-  streamer         User              @relation(fields: [streamerId], references: [id])
-  eventDefinitions EventDefinition[]
-  cards            Card[]
-  firedEvents      FiredEvent[]
-  withdrawals      Withdrawal[]
+  streamer            User                 @relation(fields: [streamerId], references: [id])
+  eventDefinitions    EventDefinition[]
+  cards               Card[]
+  firedEvents         FiredEvent[]
+  withdrawals         Withdrawal[]
+  customWebhooks      CustomWebhook[]
+  twitchSubscriptions TwitchSubscription[]
+  chatKeywords        ChatKeyword[]
 
   @@index([streamerId])
   @@index([status])
@@ -85,8 +88,9 @@ model EventDefinition {
   sortOrder     Int       @default(0) @map("sort_order")
 
   // Relations
-  episode     Episode      @relation(fields: [episodeId], references: [id], onDelete: Cascade)
-  firedEvents FiredEvent[]
+  episode      Episode       @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  firedEvents  FiredEvent[]
+  chatKeywords ChatKeyword[]
 
   @@index([episodeId])
   @@map("event_definitions")
@@ -191,4 +195,62 @@ model PendingPayment {
   @@index([userId])
   @@index([paymentIntentId])
   @@map("pending_payments")
+}
+
+// Custom Webhooks for external integrations
+model CustomWebhook {
+  id         String    @id @default(uuid())
+  episodeId  String    @map("episode_id")
+  name       String
+  secret     String // HMAC secret for verification
+  isActive   Boolean   @default(true) @map("is_active")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  usageCount Int       @default(0) @map("usage_count")
+
+  // Relations
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([episodeId])
+  @@index([secret])
+  @@map("custom_webhooks")
+}
+
+// Twitch EventSub Subscriptions
+model TwitchSubscription {
+  id             String   @id @default(uuid())
+  episodeId      String   @map("episode_id")
+  subscriptionId String   @unique @map("subscription_id") // Twitch subscription ID
+  type           String // e.g., "channel.follow", "channel.cheer"
+  status         String   @default("pending") // pending, enabled, revoked
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // Relations
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+
+  @@index([episodeId])
+  @@index([subscriptionId])
+  @@map("twitch_subscriptions")
+}
+
+// Chat Keywords for automated event triggering
+model ChatKeyword {
+  id              String    @id @default(uuid())
+  episodeId       String    @map("episode_id")
+  eventId         String    @map("event_id") // EventDefinition to trigger
+  keyword         String // Keyword or phrase to detect
+  matchType       String    @default("contains") // exact, contains, startswith, regex
+  caseSensitive   Boolean   @default(false) @map("case_sensitive")
+  cooldownSeconds Int       @default(0) @map("cooldown_seconds") // Min seconds between triggers
+  lastTriggeredAt DateTime? @map("last_triggered_at")
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  episode         Episode         @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  eventDefinition EventDefinition @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([episodeId])
+  @@index([keyword])
+  @@map("chat_keywords")
 }

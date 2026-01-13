@@ -1,9 +1,16 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import Stripe from 'stripe';
 import { prisma } from '../db/client.js';
 import { stripe } from '../services/stripe.service.js';
 import { generateCardGrid } from '@streamtree/shared';
-import { broadcastToEpisode, broadcastStats } from '../websocket/server.js';
+import { broadcastToEpisode, broadcastStats, sendToUser } from '../websocket/server.js';
+import {
+  verifyWebhookSignature,
+  mapTwitchEventType,
+  extractEventAmount,
+  getEventDisplayInfo,
+} from '../services/twitch.service.js';
 
 const router = Router();
 
@@ -169,6 +176,421 @@ async function handleAccountUpdated(account: Stripe.Account) {
   });
 
   console.log('Updated Stripe status for user:', userId);
+}
+
+// Twitch EventSub webhook handler
+router.post('/twitch', async (req: Request, res: Response) => {
+  const messageId = req.headers['twitch-eventsub-message-id'] as string;
+  const timestamp = req.headers['twitch-eventsub-message-timestamp'] as string;
+  const signature = req.headers['twitch-eventsub-message-signature'] as string;
+  const messageType = req.headers['twitch-eventsub-message-type'] as string;
+
+  // Verify signature
+  const body = JSON.stringify(req.body);
+  if (!verifyWebhookSignature(messageId, timestamp, body, signature)) {
+    console.error('Twitch webhook signature verification failed');
+    return res.status(403).json({ error: 'Invalid signature' });
+  }
+
+  // Handle verification challenge
+  if (messageType === 'webhook_callback_verification') {
+    console.log('Twitch webhook verification challenge');
+    return res.status(200).send(req.body.challenge);
+  }
+
+  // Handle revocation
+  if (messageType === 'revocation') {
+    console.log('Twitch subscription revoked:', req.body.subscription.type);
+    return res.status(200).json({ received: true });
+  }
+
+  // Handle notification
+  if (messageType === 'notification') {
+    await handleTwitchNotification(req.body);
+  }
+
+  res.status(200).json({ received: true });
+});
+
+async function handleTwitchNotification(payload: any) {
+  const { subscription, event } = payload;
+  const eventType = subscription.type;
+  const broadcasterUserId = subscription.condition.broadcaster_user_id ||
+                             subscription.condition.to_broadcaster_user_id;
+
+  console.log('Twitch event received:', eventType, 'for broadcaster:', broadcasterUserId);
+
+  // Find active episodes for this broadcaster
+  const episodes = await prisma.episode.findMany({
+    where: {
+      status: 'live',
+      streamer: {
+        twitchId: broadcasterUserId,
+      },
+    },
+    include: {
+      eventDefinitions: true,
+      streamer: { select: { id: true } },
+    },
+  });
+
+  if (episodes.length === 0) {
+    console.log('No active episodes for broadcaster:', broadcasterUserId);
+    return;
+  }
+
+  // Map Twitch event to our event type
+  const streamTreeEventType = mapTwitchEventType(eventType);
+  const eventAmount = extractEventAmount(eventType, event);
+  const displayInfo = getEventDisplayInfo(eventType, event);
+
+  // Fire events on all matching episodes
+  for (const episode of episodes) {
+    // Find matching event definitions
+    const matchingEvents = episode.eventDefinitions.filter((eventDef) => {
+      if (eventDef.triggerType !== 'twitch') return false;
+
+      const config = eventDef.triggerConfig as any;
+      if (!config) return false;
+
+      // Check event type match
+      if (config.twitchEvent !== streamTreeEventType) return false;
+
+      // Check threshold if set
+      if (config.threshold && eventAmount < config.threshold) return false;
+
+      return true;
+    });
+
+    // Fire each matching event
+    for (const eventDef of matchingEvents) {
+      await fireEventFromTwitch(episode.id, eventDef.id, event, displayInfo);
+    }
+  }
+}
+
+async function fireEventFromTwitch(
+  episodeId: string,
+  eventId: string,
+  twitchEvent: any,
+  displayInfo: { title: string; description: string }
+) {
+  try {
+    // Update event definition
+    await prisma.eventDefinition.update({
+      where: { id: eventId },
+      data: {
+        firedAt: new Date(),
+        firedCount: { increment: 1 },
+      },
+    });
+
+    // Get all cards for this episode that have this event
+    const cards = await prisma.card.findMany({
+      where: {
+        episodeId,
+        status: 'active',
+      },
+    });
+
+    let cardsAffected = 0;
+
+    for (const card of cards) {
+      const grid = card.grid as any[][];
+      let updated = false;
+
+      // Mark squares that match this event
+      for (let row = 0; row < grid.length; row++) {
+        for (let col = 0; col < grid[row].length; col++) {
+          if (grid[row][col].eventId === eventId && !grid[row][col].marked) {
+            grid[row][col].marked = true;
+            grid[row][col].markedAt = new Date();
+            updated = true;
+          }
+        }
+      }
+
+      if (updated) {
+        // Count marked squares
+        let markedCount = 0;
+        for (const row of grid) {
+          for (const cell of row) {
+            if (cell.marked) markedCount++;
+          }
+        }
+
+        // Detect patterns
+        const patterns = detectPatterns(grid);
+
+        // Update card
+        await prisma.card.update({
+          where: { id: card.id },
+          data: {
+            grid,
+            markedSquares: markedCount,
+            patterns,
+          },
+        });
+
+        cardsAffected++;
+
+        // Notify card holder
+        sendToUser(card.holderId, {
+          type: 'card:updated',
+          cardId: card.id,
+          markedSquares: markedCount,
+          patterns,
+          triggeredBy: 'twitch',
+        });
+      }
+    }
+
+    // Log fired event
+    await prisma.firedEvent.create({
+      data: {
+        episodeId,
+        eventDefinitionId: eventId,
+        firedBy: 'twitch',
+        cardsAffected,
+        triggerData: twitchEvent,
+      },
+    });
+
+    // Get event name for broadcast
+    const eventDef = await prisma.eventDefinition.findUnique({
+      where: { id: eventId },
+    });
+
+    // Broadcast to episode
+    broadcastToEpisode(episodeId, {
+      type: 'event:fired',
+      episodeId,
+      eventId,
+      eventName: eventDef?.name || displayInfo.title,
+      triggeredBy: 'twitch',
+      twitchInfo: displayInfo,
+      cardsAffected,
+    });
+
+    console.log(`Twitch event fired: ${displayInfo.title} for episode ${episodeId}, affected ${cardsAffected} cards`);
+  } catch (error) {
+    console.error('Error firing Twitch event:', error);
+  }
+}
+
+// Simple pattern detection (duplicated from shared for now)
+function detectPatterns(grid: any[][]): any[] {
+  const patterns: any[] = [];
+  const size = grid.length;
+
+  // Check rows
+  for (let row = 0; row < size; row++) {
+    if (grid[row].every((sq: any) => sq.marked)) {
+      patterns.push({ type: 'row', index: row });
+    }
+  }
+
+  // Check columns
+  for (let col = 0; col < size; col++) {
+    if (grid.every((row: any[]) => row[col].marked)) {
+      patterns.push({ type: 'column', index: col });
+    }
+  }
+
+  // Check main diagonal
+  let mainDiagonal = true;
+  for (let i = 0; i < size; i++) {
+    if (!grid[i][i].marked) {
+      mainDiagonal = false;
+      break;
+    }
+  }
+  if (mainDiagonal) {
+    patterns.push({ type: 'diagonal', direction: 'main' });
+  }
+
+  // Check anti-diagonal
+  let antiDiagonal = true;
+  for (let i = 0; i < size; i++) {
+    if (!grid[i][size - 1 - i].marked) {
+      antiDiagonal = false;
+      break;
+    }
+  }
+  if (antiDiagonal) {
+    patterns.push({ type: 'diagonal', direction: 'anti' });
+  }
+
+  // Check blackout
+  if (grid.every((row: any[]) => row.every((sq: any) => sq.marked))) {
+    patterns.push({ type: 'blackout' });
+  }
+
+  return patterns;
+}
+
+// Custom webhook handler for external integrations
+router.post('/custom/:webhookId', async (req: Request, res: Response) => {
+  const { webhookId } = req.params;
+  const signature = req.headers['x-streamtree-signature'] as string;
+
+  // Find the webhook
+  const webhook = await prisma.customWebhook.findUnique({
+    where: { id: webhookId },
+    include: {
+      episode: {
+        include: {
+          eventDefinitions: true,
+        },
+      },
+    },
+  });
+
+  if (!webhook || !webhook.isActive) {
+    return res.status(404).json({ error: 'Webhook not found or inactive' });
+  }
+
+  // Verify signature if provided
+  if (signature) {
+    const body = JSON.stringify(req.body);
+    const expectedSignature =
+      'sha256=' +
+      crypto.createHmac('sha256', webhook.secret).update(body).digest('hex');
+
+    if (signature !== expectedSignature) {
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+  }
+
+  // Check if episode is live
+  if (webhook.episode.status !== 'live') {
+    return res.status(400).json({ error: 'Episode is not live' });
+  }
+
+  const { eventName, eventId } = req.body;
+
+  // Find matching event
+  let targetEvent = webhook.episode.eventDefinitions.find((e) => e.id === eventId);
+
+  if (!targetEvent && eventName) {
+    targetEvent = webhook.episode.eventDefinitions.find(
+      (e) => e.name.toLowerCase() === eventName.toLowerCase()
+    );
+  }
+
+  if (!targetEvent) {
+    return res.status(400).json({
+      error: 'Event not found. Provide eventId or eventName.',
+    });
+  }
+
+  // Fire the event
+  try {
+    await fireEventFromCustomWebhook(webhook.episode.id, targetEvent.id, req.body);
+
+    // Update webhook usage
+    await prisma.customWebhook.update({
+      where: { id: webhook.id },
+      data: {
+        lastUsedAt: new Date(),
+        usageCount: { increment: 1 },
+      },
+    });
+
+    res.json({
+      success: true,
+      message: `Event "${targetEvent.name}" fired successfully`,
+    });
+  } catch (error) {
+    console.error('Custom webhook error:', error);
+    res.status(500).json({ error: 'Failed to fire event' });
+  }
+});
+
+async function fireEventFromCustomWebhook(
+  episodeId: string,
+  eventId: string,
+  webhookData: any
+) {
+  await prisma.eventDefinition.update({
+    where: { id: eventId },
+    data: {
+      firedAt: new Date(),
+      firedCount: { increment: 1 },
+    },
+  });
+
+  const cards = await prisma.card.findMany({
+    where: { episodeId, status: 'active' },
+  });
+
+  let cardsAffected = 0;
+
+  for (const card of cards) {
+    const grid = card.grid as any[][];
+    let updated = false;
+
+    for (let row = 0; row < grid.length; row++) {
+      for (let col = 0; col < grid[row].length; col++) {
+        if (grid[row][col].eventId === eventId && !grid[row][col].marked) {
+          grid[row][col].marked = true;
+          grid[row][col].markedAt = new Date();
+          updated = true;
+        }
+      }
+    }
+
+    if (updated) {
+      let markedCount = 0;
+      for (const row of grid) {
+        for (const cell of row) {
+          if (cell.marked) markedCount++;
+        }
+      }
+
+      const patterns = detectPatterns(grid);
+
+      await prisma.card.update({
+        where: { id: card.id },
+        data: { grid, markedSquares: markedCount, patterns },
+      });
+
+      cardsAffected++;
+
+      sendToUser(card.holderId, {
+        type: 'card:updated',
+        cardId: card.id,
+        markedSquares: markedCount,
+        patterns,
+        triggeredBy: 'webhook',
+      });
+    }
+  }
+
+  await prisma.firedEvent.create({
+    data: {
+      episodeId,
+      eventDefinitionId: eventId,
+      firedBy: 'webhook',
+      cardsAffected,
+      triggerData: webhookData,
+    },
+  });
+
+  const eventDef = await prisma.eventDefinition.findUnique({
+    where: { id: eventId },
+  });
+
+  broadcastToEpisode(episodeId, {
+    type: 'event:fired',
+    episodeId,
+    eventId,
+    eventName: eventDef?.name || 'Webhook Event',
+    triggeredBy: 'webhook',
+    cardsAffected,
+  });
+
+  console.log(`Custom webhook fired event ${eventId} for episode ${episodeId}, affected ${cardsAffected} cards`);
 }
 
 export { router as webhooksRouter };
