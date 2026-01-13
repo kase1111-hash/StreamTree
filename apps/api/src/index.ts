@@ -15,6 +15,8 @@ import { uploadRouter } from './routes/upload.js';
 import { metadataRouter } from './routes/metadata.js';
 import { twitchRouter } from './routes/twitch.js';
 import { automationRouter } from './routes/automation.js';
+import { templatesRouter } from './routes/templates.js';
+import { collaboratorsRouter } from './routes/collaborators.js';
 import { errorHandler } from './middleware/error.js';
 import { authMiddleware } from './middleware/auth.js';
 
@@ -54,6 +56,8 @@ app.use('/api/payments', authMiddleware, paymentsRouter);
 app.use('/api/upload', authMiddleware, uploadRouter);
 app.use('/api/twitch', authMiddleware, twitchRouter);
 app.use('/api/automation', authMiddleware, automationRouter);
+app.use('/api/templates', templatesRouter);
+app.use('/api/collaborators', authMiddleware, collaboratorsRouter);
 
 // Error handler
 app.use(errorHandler);

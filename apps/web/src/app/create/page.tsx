@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
-import { episodesApi } from '@/lib/api';
+import { episodesApi, templatesApi } from '@/lib/api';
 import { EventGridEditor } from '@/components/EventGrid';
 
 interface EventDef {
@@ -14,8 +14,19 @@ interface EventDef {
   description?: string | null;
 }
 
+interface Template {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  events: any[];
+  gridSize: number;
+}
+
 export default function CreateEpisodePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const templateId = searchParams.get('template');
   const { user, token } = useAuth();
   const [step, setStep] = useState<'info' | 'events'>('info');
   const [loading, setLoading] = useState(false);
@@ -28,6 +39,59 @@ export default function CreateEpisodePage() {
 
   // Events
   const [events, setEvents] = useState<EventDef[]>([]);
+
+  // Template
+  const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [loadingTemplates, setLoadingTemplates] = useState(false);
+
+  // Load template if specified
+  useEffect(() => {
+    if (templateId && token) {
+      loadTemplate(templateId);
+    }
+  }, [templateId, token]);
+
+  const loadTemplate = async (id: string) => {
+    try {
+      const template = await templatesApi.get(id, token || undefined);
+      setSelectedTemplate(template);
+      setName(template.name);
+      setGridSize(template.gridSize);
+    } catch (err) {
+      console.error('Failed to load template:', err);
+    }
+  };
+
+  const fetchTemplates = async () => {
+    setLoadingTemplates(true);
+    try {
+      const data = await templatesApi.browse() as any;
+      setTemplates(data);
+    } catch (err) {
+      console.error('Failed to load templates:', err);
+    }
+    setLoadingTemplates(false);
+  };
+
+  const openTemplateSelector = () => {
+    setShowTemplates(true);
+    fetchTemplates();
+  };
+
+  const selectTemplate = (template: Template) => {
+    setSelectedTemplate(template);
+    setName(template.name);
+    setGridSize(template.gridSize);
+    setShowTemplates(false);
+  };
+
+  const clearTemplate = () => {
+    setSelectedTemplate(null);
+    setName('');
+    setGridSize(5);
+  };
 
   // Not a streamer
   if (user && !user.isStreamer) {
@@ -85,6 +149,25 @@ export default function CreateEpisodePage() {
         token
       );
       setEpisodeId(episode.id);
+
+      // If using a template, add all events from it
+      if (selectedTemplate && selectedTemplate.events.length > 0) {
+        const addedEvents: EventDef[] = [];
+        for (const templateEvent of selectedTemplate.events) {
+          try {
+            const newEvent = await episodesApi.addEvent(episode.id, {
+              name: templateEvent.name,
+              icon: templateEvent.icon || '🎯',
+              description: templateEvent.description,
+            }, token);
+            addedEvents.push(newEvent);
+          } catch (err) {
+            console.error('Failed to add event from template:', err);
+          }
+        }
+        setEvents(addedEvents);
+      }
+
       setStep('events');
     } catch (err: any) {
       setError(err.message || 'Failed to create episode');
@@ -176,6 +259,52 @@ export default function CreateEpisodePage() {
           <p className="text-center text-gray-600 dark:text-gray-400 mb-8">
             Set up a new streaming bingo game
           </p>
+
+          {/* Template Selection */}
+          <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow-lg mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Start from Template</h2>
+              <Link
+                href="/templates"
+                className="text-sm text-primary-600 hover:underline"
+              >
+                Browse all
+              </Link>
+            </div>
+
+            {selectedTemplate ? (
+              <div className="p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-lg">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="font-semibold">{selectedTemplate.name}</div>
+                    {selectedTemplate.description && (
+                      <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                        {selectedTemplate.description}
+                      </div>
+                    )}
+                    <div className="text-sm text-gray-500 mt-2">
+                      {selectedTemplate.events.length} events · {selectedTemplate.gridSize}x{selectedTemplate.gridSize} grid
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearTemplate}
+                    className="text-sm text-gray-500 hover:text-red-500 transition"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={openTemplateSelector}
+                className="w-full p-4 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg hover:border-primary-400 transition text-gray-500 hover:text-primary-600"
+              >
+                Click to select a template (optional)
+              </button>
+            )}
+          </div>
 
           <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow-lg">
             <form onSubmit={handleCreateEpisode}>
@@ -275,6 +404,63 @@ export default function CreateEpisodePage() {
           <p className="mt-4 text-center text-sm text-gray-500">
             You can add more events after launching, but viewers will only get new events on new cards
           </p>
+        </div>
+      )}
+
+      {/* Template Selector Modal */}
+      {showTemplates && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="p-6 border-b dark:border-gray-700">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-bold">Select a Template</h2>
+                <button
+                  onClick={() => setShowTemplates(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6">
+              {loadingTemplates ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
+                </div>
+              ) : templates.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  <p>No templates available</p>
+                  <Link
+                    href="/templates"
+                    className="text-primary-600 hover:underline mt-2 inline-block"
+                  >
+                    Browse template gallery
+                  </Link>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {templates.map((template) => (
+                    <button
+                      key={template.id}
+                      onClick={() => selectTemplate(template)}
+                      className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition text-left"
+                    >
+                      <div className="font-semibold mb-1">{template.name}</div>
+                      {template.description && (
+                        <div className="text-sm text-gray-500 line-clamp-2 mb-2">
+                          {template.description}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-400">
+                        {template.events.length} events · {template.gridSize}x{template.gridSize} grid
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
     </div>
