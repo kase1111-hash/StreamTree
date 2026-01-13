@@ -367,6 +367,69 @@ router.get('/:id/stats', requireStreamer, async (req: AuthenticatedRequest, res,
   }
 });
 
+// Get episode results (public for ended episodes)
+router.get('/:id/results', async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const episode = await prisma.episode.findUnique({
+      where: { id: req.params.id },
+      include: {
+        streamer: {
+          select: { id: true, username: true, displayName: true },
+        },
+        eventDefinitions: true,
+        firedEvents: true,
+      },
+    });
+
+    if (!episode) {
+      throw new AppError('Episode not found', 404, 'NOT_FOUND');
+    }
+
+    // Only show results for ended episodes (or live/ended for the streamer)
+    if (episode.status === 'draft') {
+      throw new AppError('Episode not available', 404, 'NOT_FOUND');
+    }
+
+    const leaderboard = await prisma.card.findMany({
+      where: { episodeId: episode.id },
+      orderBy: { markedSquares: 'desc' },
+      take: 50,
+      include: {
+        holder: {
+          select: { id: true, username: true, displayName: true },
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        id: episode.id,
+        name: episode.name,
+        artworkUrl: episode.artworkUrl,
+        status: episode.status,
+        cardsMinted: episode.cardsMinted,
+        totalRevenue: episode.totalRevenue,
+        launchedAt: episode.launchedAt,
+        endedAt: episode.endedAt,
+        streamer: episode.streamer,
+        eventsFired: episode.firedEvents.length,
+        totalEvents: episode.eventDefinitions.length,
+        leaderboard: leaderboard.map((card, index) => ({
+          rank: index + 1,
+          cardId: card.id,
+          holderId: card.holderId,
+          username: card.holder.displayName || card.holder.username,
+          markedSquares: card.markedSquares,
+          patterns: card.patterns,
+        })),
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Add event definition
 router.post('/:id/events', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
   try {
