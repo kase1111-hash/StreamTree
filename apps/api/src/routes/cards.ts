@@ -94,7 +94,7 @@ router.get('/:id', async (req: AuthenticatedRequest, res, next) => {
               orderBy: { sortOrder: 'asc' },
             },
             streamer: {
-              select: { username: true, displayName: true, avatarUrl: true },
+              select: { id: true, username: true, displayName: true, avatarUrl: true },
             },
           },
         },
@@ -108,11 +108,12 @@ router.get('/:id', async (req: AuthenticatedRequest, res, next) => {
       throw new AppError('Card not found', 404, 'NOT_FOUND');
     }
 
-    // Only holder can see their card details during live episode
+    // Only holder or streamer can see card details during live episode
+    // SECURITY: Compare by user ID, not username (IDs are immutable and unique)
     if (
       card.episode.status === 'live' &&
       card.holderId !== req.user!.id &&
-      card.episode.streamer.username !== req.user!.username
+      card.episode.streamer.id !== req.user!.id
     ) {
       throw new AppError('Not authorized', 403, 'FORBIDDEN');
     }
