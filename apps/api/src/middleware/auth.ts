@@ -3,6 +3,24 @@ import jwt from 'jsonwebtoken';
 import { prisma } from '../db/client.js';
 import { AppError } from './error.js';
 
+// SECURITY: Validate JWT_SECRET at module load time (fail fast)
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    const errorMsg = 'FATAL: JWT_SECRET environment variable is not set. Authentication cannot work.';
+    console.error(errorMsg);
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(errorMsg);
+    }
+    // In development, use a warning but allow startup for testing
+    console.warn('WARNING: Using insecure default for development only');
+    return 'INSECURE_DEV_SECRET_DO_NOT_USE_IN_PRODUCTION';
+  }
+  return secret;
+}
+
+const JWT_SECRET = getJwtSecret();
+
 export interface AuthenticatedRequest extends Request {
   user?: {
     id: string;
@@ -24,13 +42,8 @@ export async function authMiddleware(
     }
 
     const token = authHeader.substring(7);
-    const secret = process.env.JWT_SECRET;
 
-    if (!secret) {
-      throw new AppError('JWT secret not configured', 500, 'CONFIG_ERROR');
-    }
-
-    const decoded = jwt.verify(token, secret) as {
+    const decoded = jwt.verify(token, JWT_SECRET) as {
       userId: string;
       username: string;
       isStreamer: boolean;
