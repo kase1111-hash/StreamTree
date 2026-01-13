@@ -9,23 +9,29 @@ datasource db {
 
 // Users
 model User {
-  id                  String   @id @default(uuid())
-  walletAddress       String?  @unique @map("wallet_address")
-  custodialWalletId   String?  @map("custodial_wallet_id")
-  username            String   @unique
-  displayName         String?  @map("display_name")
-  avatarUrl           String?  @map("avatar_url")
-  authProvider        String   @map("auth_provider")
-  authProviderId      String   @map("auth_provider_id")
-  isStreamer          Boolean  @default(false) @map("is_streamer")
-  twitchId            String?  @map("twitch_id")
-  twitchAccessToken   String?  @map("twitch_access_token")
-  createdAt           DateTime @default(now()) @map("created_at")
-  lastActiveAt        DateTime @default(now()) @map("last_active_at")
+  id                    String   @id @default(uuid())
+  walletAddress         String?  @unique @map("wallet_address")
+  custodialWalletId     String?  @map("custodial_wallet_id")
+  username              String   @unique
+  displayName           String?  @map("display_name")
+  avatarUrl             String?  @map("avatar_url")
+  authProvider          String   @map("auth_provider")
+  authProviderId        String   @map("auth_provider_id")
+  isStreamer            Boolean  @default(false) @map("is_streamer")
+  twitchId              String?  @map("twitch_id")
+  twitchAccessToken     String?  @map("twitch_access_token")
+  createdAt             DateTime @default(now()) @map("created_at")
+  lastActiveAt          DateTime @default(now()) @map("last_active_at")
+
+  // Stripe Connect fields
+  stripeAccountId       String?  @map("stripe_account_id")
+  stripeChargesEnabled  Boolean  @default(false) @map("stripe_charges_enabled")
+  stripePayoutsEnabled  Boolean  @default(false) @map("stripe_payouts_enabled")
 
   // Relations
-  episodes Episode[]
-  cards    Card[]
+  episodes    Episode[]
+  cards       Card[]
+  withdrawals Withdrawal[]
 
   @@unique([authProvider, authProviderId])
   @@map("users")
@@ -56,6 +62,7 @@ model Episode {
   eventDefinitions EventDefinition[]
   cards            Card[]
   firedEvents      FiredEvent[]
+  withdrawals      Withdrawal[]
 
   @@index([streamerId])
   @@index([status])
@@ -143,4 +150,45 @@ model RefreshToken {
   @@index([userId])
   @@index([token])
   @@map("refresh_tokens")
+}
+
+// Withdrawals
+model Withdrawal {
+  id               String    @id @default(uuid())
+  streamerId       String    @map("streamer_id")
+  episodeId        String    @map("episode_id")
+  amount           Int                              // Amount in cents
+  platformFee      Int       @map("platform_fee")   // Fee taken by platform
+  netAmount        Int       @map("net_amount")     // Amount to streamer
+  status           String    @default("pending")    // pending, processing, completed, failed
+  stripeTransferId String?   @map("stripe_transfer_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  completedAt      DateTime? @map("completed_at")
+  failedReason     String?   @map("failed_reason")
+
+  // Relations
+  streamer User    @relation(fields: [streamerId], references: [id])
+  episode  Episode @relation(fields: [episodeId], references: [id])
+
+  @@index([streamerId])
+  @@index([episodeId])
+  @@index([status])
+  @@map("withdrawals")
+}
+
+// Pending Payments (for tracking mint requests before payment completes)
+model PendingPayment {
+  id              String   @id @default(uuid())
+  episodeId       String   @map("episode_id")
+  userId          String   @map("user_id")
+  paymentIntentId String   @unique @map("payment_intent_id")
+  amount          Int
+  status          String   @default("pending") // pending, completed, expired, failed
+  createdAt       DateTime @default(now()) @map("created_at")
+  expiresAt       DateTime @map("expires_at")
+
+  @@index([episodeId])
+  @@index([userId])
+  @@index([paymentIntentId])
+  @@map("pending_payments")
 }
