@@ -12,6 +12,7 @@ import { publicRouter } from './routes/public.js';
 import { webhooksRouter } from './routes/webhooks.js';
 import { paymentsRouter } from './routes/payments.js';
 import { uploadRouter } from './routes/upload.js';
+import { metadataRouter } from './routes/metadata.js';
 import { errorHandler } from './middleware/error.js';
 import { authMiddleware } from './middleware/auth.js';
 
@@ -41,6 +42,7 @@ app.use('/api/webhooks', webhooksRouter);
 // Public routes (no auth)
 app.use('/api/public', publicRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/metadata', metadataRouter);
 
 // Protected routes
 app.use('/api/episodes', authMiddleware, episodesRouter);

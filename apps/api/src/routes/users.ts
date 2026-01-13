@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
+import { isValidAddress } from '../services/blockchain.service.js';
 
 const router = Router();
 
@@ -110,6 +111,49 @@ router.get('/me/stats', async (req: AuthenticatedRequest, res, next) => {
         episodesLive,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Link wallet to user account
+router.post('/me/wallet', async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const { walletAddress } = req.body;
+
+    if (!walletAddress || typeof walletAddress !== 'string') {
+      throw new AppError('Wallet address is required', 400, 'VALIDATION_ERROR');
+    }
+
+    if (!isValidAddress(walletAddress)) {
+      throw new AppError('Invalid wallet address', 400, 'VALIDATION_ERROR');
+    }
+
+    // Check if wallet is already linked to another account
+    const existingUser = await prisma.user.findUnique({
+      where: { walletAddress: walletAddress.toLowerCase() },
+    });
+
+    if (existingUser && existingUser.id !== req.user!.id) {
+      throw new AppError('Wallet already linked to another account', 400, 'WALLET_TAKEN');
+    }
+
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: {
+        walletAddress: walletAddress.toLowerCase(),
+      },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+        walletAddress: true,
+        isStreamer: true,
+      },
+    });
+
+    res.json({ success: true, data: user });
   } catch (error) {
     next(error);
   }

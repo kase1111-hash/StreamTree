@@ -163,6 +163,9 @@ export const usersApi = {
 
   getStats: (token: string) =>
     api<any>('/api/users/me/stats', { token }),
+
+  linkWallet: (token: string, walletAddress: string) =>
+    api<any>('/api/users/me/wallet', { method: 'POST', body: { walletAddress }, token }),
 };
 
 // Payments
