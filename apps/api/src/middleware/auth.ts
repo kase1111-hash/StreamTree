@@ -21,6 +21,9 @@ function getJwtSecret(): string {
 
 const JWT_SECRET = getJwtSecret();
 
+// Cookie name for access token (must match auth.ts)
+const ACCESS_TOKEN_COOKIE = 'streamtree_access_token';
+
 export interface AuthenticatedRequest extends Request {
   user?: {
     id: string;
@@ -35,13 +38,17 @@ export async function authMiddleware(
   next: NextFunction
 ) {
   try {
+    // SECURITY: Read token from HttpOnly cookie (preferred) or Authorization header (backwards compat)
     const authHeader = req.headers.authorization;
+    const cookieToken = req.cookies?.[ACCESS_TOKEN_COOKIE];
+    const headerToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
 
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Prefer cookie over header for security
+    const token = cookieToken || headerToken;
+
+    if (!token) {
       throw new AppError('No token provided', 401, 'UNAUTHORIZED');
     }
-
-    const token = authHeader.substring(7);
 
     const decoded = jwt.verify(token, JWT_SECRET) as {
       userId: string;

@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
-import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
+import { authMiddleware, AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
 import {
   uploadFile,
   deleteFile,
@@ -103,8 +103,10 @@ router.post(
 );
 
 // Upload avatar
+// SECURITY: authMiddleware required to populate req.user and verify authentication
 router.post(
   '/avatar',
+  authMiddleware,
   upload.single('file'),
   async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     try {

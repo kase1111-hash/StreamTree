@@ -1,10 +1,48 @@
-import { Router } from 'express';
+import { Router, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { v4 as uuid } from 'uuid';
 import { ethers } from 'ethers';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { generateShareCode } from '@streamtree/shared';
+
+// SECURITY: Cookie configuration for HttpOnly tokens
+const isProduction = process.env.NODE_ENV === 'production';
+const COOKIE_OPTIONS = {
+  httpOnly: true,           // Prevents JavaScript access (XSS protection)
+  secure: isProduction,     // HTTPS only in production
+  sameSite: 'lax' as const, // CSRF protection
+  path: '/',
+};
+
+const ACCESS_TOKEN_COOKIE = 'streamtree_access_token';
+const REFRESH_TOKEN_COOKIE = 'streamtree_refresh_token';
+
+/**
+ * SECURITY: Set authentication cookies with HttpOnly flag
+ * This prevents XSS attacks from stealing tokens via JavaScript
+ */
+function setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
+  // Access token: shorter expiry (1 hour)
+  res.cookie(ACCESS_TOKEN_COOKIE, accessToken, {
+    ...COOKIE_OPTIONS,
+    maxAge: 60 * 60 * 1000, // 1 hour
+  });
+
+  // Refresh token: longer expiry (7 days)
+  res.cookie(REFRESH_TOKEN_COOKIE, refreshToken, {
+    ...COOKIE_OPTIONS,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  });
+}
+
+/**
+ * SECURITY: Clear authentication cookies on logout
+ */
+function clearAuthCookies(res: Response) {
+  res.clearCookie(ACCESS_TOKEN_COOKIE, COOKIE_OPTIONS);
+  res.clearCookie(REFRESH_TOKEN_COOKIE, COOKIE_OPTIONS);
+}
 
 // SECURITY: Validate JWT_SECRET at module load time (fail fast)
 // This prevents the server from starting without proper configuration
@@ -136,6 +174,9 @@ router.post('/custodial', async (req, res, next) => {
       },
     });
 
+    // SECURITY: Set HttpOnly cookies for tokens
+    setAuthCookies(res, token, refreshToken);
+
     res.json({
       success: true,
       data: {
@@ -146,6 +187,8 @@ router.post('/custodial', async (req, res, next) => {
           avatarUrl: user.avatarUrl,
           isStreamer: user.isStreamer,
         },
+        // Still include tokens in response for backwards compatibility during migration
+        // Frontend should prefer cookies but can fall back to these
         token,
         refreshToken,
       },
@@ -212,6 +255,9 @@ router.post('/wallet', async (req, res, next) => {
       },
     });
 
+    // SECURITY: Set HttpOnly cookies for tokens
+    setAuthCookies(res, token, refreshToken);
+
     res.json({
       success: true,
       data: {
@@ -235,7 +281,8 @@ router.post('/wallet', async (req, res, next) => {
 // Refresh token
 router.post('/refresh', async (req, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    // SECURITY: Read refresh token from cookie (preferred) or body (backwards compatibility)
+    const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE] || req.body.refreshToken;
 
     if (!refreshToken) {
       throw new AppError('Refresh token required', 400, 'VALIDATION_ERROR');
@@ -246,6 +293,8 @@ router.post('/refresh', async (req, res, next) => {
     });
 
     if (!storedToken || storedToken.expiresAt < new Date()) {
+      // Clear invalid cookies
+      clearAuthCookies(res);
       throw new AppError('Invalid or expired refresh token', 401, 'INVALID_TOKEN');
     }
 
@@ -254,6 +303,7 @@ router.post('/refresh', async (req, res, next) => {
     });
 
     if (!user) {
+      clearAuthCookies(res);
       throw new AppError('User not found', 401, 'UNAUTHORIZED');
     }
 
@@ -274,6 +324,9 @@ router.post('/refresh', async (req, res, next) => {
       },
     });
 
+    // SECURITY: Set new HttpOnly cookies
+    setAuthCookies(res, tokens.token, tokens.refreshToken);
+
     res.json({
       success: true,
       data: tokens,
@@ -286,7 +339,8 @@ router.post('/refresh', async (req, res, next) => {
 // Logout
 router.post('/logout', async (req, res, next) => {
   try {
-    const { refreshToken } = req.body;
+    // SECURITY: Read refresh token from cookie (preferred) or body
+    const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE] || req.body.refreshToken;
 
     if (refreshToken) {
       await prisma.refreshToken.deleteMany({
@@ -294,7 +348,57 @@ router.post('/logout', async (req, res, next) => {
       });
     }
 
+    // SECURITY: Clear HttpOnly cookies
+    clearAuthCookies(res);
+
     res.json({ success: true, data: { message: 'Logged out' } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get current user from cookie (for session validation)
+router.get('/me', async (req, res, next) => {
+  try {
+    // Read token from cookie
+    const token = req.cookies?.[ACCESS_TOKEN_COOKIE];
+
+    if (!token) {
+      return res.json({ success: true, data: { user: null } });
+    }
+
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
+
+      const user = await prisma.user.findUnique({
+        where: { id: decoded.userId },
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          avatarUrl: true,
+          isStreamer: true,
+          walletAddress: true,
+        },
+      });
+
+      if (!user) {
+        clearAuthCookies(res);
+        return res.json({ success: true, data: { user: null } });
+      }
+
+      res.json({ success: true, data: { user } });
+    } catch (jwtError) {
+      // Token expired or invalid - try refresh
+      const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE];
+      if (!refreshToken) {
+        clearAuthCookies(res);
+        return res.json({ success: true, data: { user: null } });
+      }
+
+      // Let the client know to refresh
+      return res.json({ success: true, data: { user: null, needsRefresh: true } });
+    }
   } catch (error) {
     next(error);
   }
@@ -303,12 +407,15 @@ router.post('/logout', async (req, res, next) => {
 // Become a streamer
 router.post('/become-streamer', async (req, res, next) => {
   try {
+    // Read token from cookie (preferred) or Authorization header
     const authHeader = req.headers.authorization;
-    if (!authHeader) {
+    const cookieToken = req.cookies?.[ACCESS_TOKEN_COOKIE];
+    const token = cookieToken || (authHeader ? authHeader.substring(7) : null);
+
+    if (!token) {
       throw new AppError('Authorization required', 401, 'UNAUTHORIZED');
     }
 
-    const token = authHeader.substring(7);
     const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
 
     const user = await prisma.user.update({
@@ -317,6 +424,12 @@ router.post('/become-streamer', async (req, res, next) => {
     });
 
     const tokens = generateTokens(user);
+
+    // SECURITY: Update access token cookie with new isStreamer claim
+    res.cookie(ACCESS_TOKEN_COOKIE, tokens.token, {
+      ...COOKIE_OPTIONS,
+      maxAge: 60 * 60 * 1000, // 1 hour
+    });
 
     res.json({
       success: true,
