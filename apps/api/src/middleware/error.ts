@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { sanitizeError } from '../utils/sanitize.js';
 
 export class AppError extends Error {
   public statusCode: number;
@@ -25,7 +26,9 @@ export function errorHandler(
   res: Response,
   next: NextFunction
 ) {
-  console.error('Error:', err);
+  // SECURITY: Only log sanitized error message, not the full error object
+  // which may contain sensitive data like tokens, request bodies, etc.
+  console.error('Error:', sanitizeError(err));
 
   if (err instanceof AppError) {
     return res.status(err.statusCode).json({

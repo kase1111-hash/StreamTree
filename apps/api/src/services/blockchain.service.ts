@@ -1,4 +1,5 @@
 import { ethers, Contract, Wallet, JsonRpcProvider } from 'ethers';
+import { sanitizeError } from '../utils/sanitize.js';
 
 // SECURITY: Validate and protect private key
 // Private keys are extremely sensitive - never log them
@@ -79,8 +80,7 @@ if (isConfigured) {
     console.log('Wallet address:', wallet.address);
   } catch (error) {
     // SECURITY: Sanitize error to prevent private key leakage
-    const sanitizedError = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Failed to initialize blockchain service:', sanitizedError);
+    console.error('Failed to initialize blockchain service:', sanitizeError(error));
   }
 } else {
   if (process.env.L2_PRIVATE_KEY && !validatedPrivateKey) {
@@ -161,7 +161,7 @@ export async function createRootToken(
 
     return null;
   } catch (error) {
-    console.error('Failed to create root token:', error);
+    console.error('Failed to create root token:', sanitizeError(error));
     throw error;
   }
 }
@@ -186,7 +186,7 @@ export async function endRootToken(rootTokenId: string): Promise<string | null> 
 
     return tx.hash;
   } catch (error) {
-    console.error('Failed to end root token:', error);
+    console.error('Failed to end root token:', sanitizeError(error));
     throw error;
   }
 }
@@ -243,7 +243,7 @@ export async function mintBranchToken(
 
     return null;
   } catch (error) {
-    console.error('Failed to mint branch token:', error);
+    console.error('Failed to mint branch token:', sanitizeError(error));
     throw error;
   }
 }
@@ -300,7 +300,7 @@ export async function mintFruitToken(
 
     return null;
   } catch (error) {
-    console.error('Failed to mint fruit token:', error);
+    console.error('Failed to mint fruit token:', sanitizeError(error));
     throw error;
   }
 }
@@ -354,7 +354,7 @@ export async function batchMintFruitTokens(
     console.log('Batch minted', results.length, 'fruit tokens');
     return results;
   } catch (error) {
-    console.error('Failed to batch mint fruit tokens:', error);
+    console.error('Failed to batch mint fruit tokens:', sanitizeError(error));
     throw error;
   }
 }
@@ -369,7 +369,7 @@ export async function getRootByEpisode(episodeId: string): Promise<string | null
     const rootId = await contract.getRootByEpisode(episodeId);
     return rootId.toString() === '0' ? null : rootId.toString();
   } catch (error) {
-    console.error('Failed to get root by episode:', error);
+    console.error('Failed to get root by episode:', sanitizeError(error));
     return null;
   }
 }
@@ -384,7 +384,7 @@ export async function getBranchByCard(cardId: string): Promise<string | null> {
     const branchId = await contract.getBranchByCard(cardId);
     return branchId.toString() === '0' ? null : branchId.toString();
   } catch (error) {
-    console.error('Failed to get branch by card:', error);
+    console.error('Failed to get branch by card:', sanitizeError(error));
     return null;
   }
 }
@@ -398,7 +398,7 @@ export async function getTokenOwner(tokenId: string): Promise<string | null> {
   try {
     return await contract.ownerOf(tokenId);
   } catch (error) {
-    console.error('Failed to get token owner:', error);
+    console.error('Failed to get token owner:', sanitizeError(error));
     return null;
   }
 }
@@ -412,7 +412,7 @@ export async function getTokenURI(tokenId: string): Promise<string | null> {
   try {
     return await contract.tokenURI(tokenId);
   } catch (error) {
-    console.error('Failed to get token URI:', error);
+    console.error('Failed to get token URI:', sanitizeError(error));
     return null;
   }
 }
@@ -445,7 +445,7 @@ export function verifySignature(
     const recoveredAddress = ethers.verifyMessage(message, signature);
     return recoveredAddress.toLowerCase() === expectedAddress.toLowerCase();
   } catch (error) {
-    console.error('Signature verification failed:', error);
+    console.error('Signature verification failed:', sanitizeError(error));
     return false;
   }
 }
@@ -473,7 +473,7 @@ export async function getNetworkInfo(): Promise<{
       name: network.name,
     };
   } catch (error) {
-    console.error('Failed to get network info:', error);
+    console.error('Failed to get network info:', sanitizeError(error));
     return null;
   }
 }

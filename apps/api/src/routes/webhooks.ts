@@ -11,6 +11,7 @@ import {
   extractEventAmount,
   getEventDisplayInfo,
 } from '../services/twitch.service.js';
+import { sanitizeError } from '../utils/sanitize.js';
 
 const router = Router();
 
@@ -409,7 +410,7 @@ async function fireEventFromTwitch(
 
     console.log(`Twitch event fired: ${displayInfo.title} for episode ${episodeId}, affected ${cardsAffected} cards`);
   } catch (error) {
-    console.error('Error firing Twitch event:', error);
+    console.error('Error firing Twitch event:', sanitizeError(error));
   }
 }
 
@@ -556,7 +557,7 @@ router.post('/custom/:webhookId', async (req: Request, res: Response) => {
       message: `Event "${targetEvent.name}" fired successfully`,
     });
   } catch (error) {
-    console.error('Custom webhook error:', error);
+    console.error('Custom webhook error:', sanitizeError(error));
     res.status(500).json({ error: 'Failed to fire event' });
   }
 });

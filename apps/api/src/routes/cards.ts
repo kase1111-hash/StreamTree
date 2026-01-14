@@ -9,6 +9,7 @@ import {
   mintBranchToken,
   generateMetadataUri,
 } from '../services/blockchain.service.js';
+import { sanitizeError } from '../utils/sanitize.js';
 
 const router = Router();
 
@@ -263,7 +264,7 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
           });
         }
       } catch (error) {
-        console.error('Failed to mint branch token, continuing without blockchain:', error);
+        console.error('Failed to mint branch token, continuing without blockchain:', sanitizeError(error));
         // Continue without blockchain - don't block the card creation
       }
     }

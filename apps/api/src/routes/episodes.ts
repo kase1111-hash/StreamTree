@@ -12,6 +12,7 @@ import {
   generateMetadataUri,
   getContractAddress,
 } from '../services/blockchain.service.js';
+import { sanitizeError } from '../utils/sanitize.js';
 
 const router = Router();
 
@@ -277,7 +278,7 @@ router.post('/:id/launch', requireStreamer, async (req: AuthenticatedRequest, re
           console.log('Root token created:', rootTokenId, 'tx:', result.transactionHash);
         }
       } catch (error) {
-        console.error('Failed to mint root token, continuing without blockchain:', error);
+        console.error('Failed to mint root token, continuing without blockchain:', sanitizeError(error));
         // Continue without blockchain - don't block the launch
       }
     }
@@ -335,7 +336,7 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
         await endRootToken(episode.rootTokenId);
         console.log('Root token ended:', episode.rootTokenId);
       } catch (error) {
-        console.error('Failed to end root token:', error);
+        console.error('Failed to end root token:', sanitizeError(error));
         // Continue anyway
       }
     }
@@ -409,7 +410,7 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
             }
           }
         } catch (error) {
-          console.error('Failed to batch mint fruit tokens:', error);
+          console.error('Failed to batch mint fruit tokens:', sanitizeError(error));
           // Continue - update card status without blockchain tokens
         }
       }

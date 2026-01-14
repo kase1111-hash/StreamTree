@@ -3,6 +3,7 @@ import multer from 'multer';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { authMiddleware, AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
+import { sanitizeError } from '../utils/sanitize.js';
 import {
   uploadFile,
   deleteFile,
@@ -68,7 +69,7 @@ router.post(
           const oldKey = episode.artworkUrl.split('/').slice(-2).join('/');
           await deleteFile(oldKey);
         } catch (err) {
-          console.error('Failed to delete old artwork:', err);
+          console.error('Failed to delete old artwork:', sanitizeError(err));
         }
       }
 
@@ -137,7 +138,7 @@ router.post(
           const oldKey = user.avatarUrl.split('/').slice(-2).join('/');
           await deleteFile(oldKey);
         } catch (err) {
-          console.error('Failed to delete old avatar:', err);
+          console.error('Failed to delete old avatar:', sanitizeError(err));
         }
       }
 
@@ -194,7 +195,7 @@ router.delete(
           const key = episode.artworkUrl.split('/').slice(-2).join('/');
           await deleteFile(key);
         } catch (err) {
-          console.error('Failed to delete artwork:', err);
+          console.error('Failed to delete artwork:', sanitizeError(err));
         }
       }
 

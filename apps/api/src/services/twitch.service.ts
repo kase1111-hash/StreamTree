@@ -5,6 +5,7 @@
 
 import crypto from 'crypto';
 import { prisma } from '../db/client.js';
+import { sanitizeError } from '../utils/sanitize.js';
 
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID || '';
 const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET || '';
@@ -65,7 +66,7 @@ export async function initializeWebhookSecretsCache(): Promise<void> {
     secretsCacheInitialized = true;
     console.log(`Loaded ${subscriptions.length} Twitch webhook secrets from database`);
   } catch (error) {
-    console.error('Failed to initialize webhook secrets cache:', error);
+    console.error('Failed to initialize webhook secrets cache:', sanitizeError(error));
   }
 }
 
@@ -90,7 +91,7 @@ async function getWebhookSecret(subscriptionId: string): Promise<string | null> 
       return subscription.secret;
     }
   } catch (error) {
-    console.error('Failed to fetch webhook secret from database:', error);
+    console.error('Failed to fetch webhook secret from database:', sanitizeError(error));
   }
 
   return null;
@@ -120,7 +121,7 @@ async function getAllWebhookSecrets(): Promise<string[]> {
 
     return subscriptions.map(s => s.secret);
   } catch (error) {
-    console.error('Failed to fetch webhook secrets from database:', error);
+    console.error('Failed to fetch webhook secrets from database:', sanitizeError(error));
     return [];
   }
 }
@@ -175,13 +176,14 @@ export async function exchangeCode(code: string): Promise<TwitchTokenResponse | 
     });
 
     if (!response.ok) {
-      console.error('Twitch token exchange failed:', await response.text());
+      // SECURITY: Don't log response body - may contain sensitive error details
+      console.error('Twitch token exchange failed: HTTP', response.status);
       return null;
     }
 
     return await response.json();
   } catch (error) {
-    console.error('Twitch token exchange error:', error);
+    console.error('Twitch token exchange error:', sanitizeError(error));
     return null;
   }
 }
@@ -205,13 +207,14 @@ export async function refreshToken(refreshToken: string): Promise<TwitchTokenRes
     });
 
     if (!response.ok) {
-      console.error('Twitch token refresh failed:', await response.text());
+      // SECURITY: Don't log response body - may contain sensitive error details
+      console.error('Twitch token refresh failed: HTTP', response.status);
       return null;
     }
 
     return await response.json();
   } catch (error) {
-    console.error('Twitch token refresh error:', error);
+    console.error('Twitch token refresh error:', sanitizeError(error));
     return null;
   }
 }
@@ -229,14 +232,15 @@ export async function getUser(accessToken: string): Promise<TwitchUser | null> {
     });
 
     if (!response.ok) {
-      console.error('Twitch get user failed:', await response.text());
+      // SECURITY: Don't log response body - may contain sensitive error details
+      console.error('Twitch get user failed: HTTP', response.status);
       return null;
     }
 
     const data = await response.json();
     return data.data[0] || null;
   } catch (error) {
-    console.error('Twitch get user error:', error);
+    console.error('Twitch get user error:', sanitizeError(error));
     return null;
   }
 }
@@ -259,14 +263,15 @@ async function getAppAccessToken(): Promise<string | null> {
     });
 
     if (!response.ok) {
-      console.error('Twitch app token failed:', await response.text());
+      // SECURITY: Don't log response body - may contain sensitive error details
+      console.error('Twitch app token failed: HTTP', response.status);
       return null;
     }
 
     const data = await response.json();
     return data.access_token;
   } catch (error) {
-    console.error('Twitch app token error:', error);
+    console.error('Twitch app token error:', sanitizeError(error));
     return null;
   }
 }
@@ -307,8 +312,8 @@ export async function createEventSubSubscription(
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Twitch EventSub subscription failed:', errorText);
+      // SECURITY: Don't log response body - may contain sensitive error details
+      console.error('Twitch EventSub subscription failed: HTTP', response.status);
       return null;
     }
 
@@ -328,7 +333,7 @@ export async function createEventSubSubscription(
           },
         });
       } catch (dbError) {
-        console.error('Failed to store Twitch subscription in database:', dbError);
+        console.error('Failed to store Twitch subscription in database:', sanitizeError(dbError));
         // Continue - the subscription was created on Twitch's side
       }
     }
@@ -338,7 +343,7 @@ export async function createEventSubSubscription(
 
     return subscription;
   } catch (error) {
-    console.error('Twitch EventSub subscription error:', error);
+    console.error('Twitch EventSub subscription error:', sanitizeError(error));
     return null;
   }
 }
@@ -373,16 +378,17 @@ export async function deleteEventSubSubscription(subscriptionId: string): Promis
         });
       } catch (dbError) {
         // May not exist in database (legacy subscriptions)
-        console.warn('Could not delete subscription from database:', dbError);
+        console.warn('Could not delete subscription from database:', sanitizeError(dbError));
       }
 
       return true;
     }
 
-    console.error('Twitch EventSub delete failed:', await response.text());
+    // SECURITY: Don't log response body - may contain sensitive error details
+    console.error('Twitch EventSub delete failed: HTTP', response.status);
     return false;
   } catch (error) {
-    console.error('Twitch EventSub delete error:', error);
+    console.error('Twitch EventSub delete error:', sanitizeError(error));
     return false;
   }
 }
@@ -403,14 +409,15 @@ export async function listEventSubSubscriptions(): Promise<EventSubSubscription[
     });
 
     if (!response.ok) {
-      console.error('Twitch EventSub list failed:', await response.text());
+      // SECURITY: Don't log response body - may contain sensitive error details
+      console.error('Twitch EventSub list failed: HTTP', response.status);
       return [];
     }
 
     const data = await response.json();
     return data.data || [];
   } catch (error) {
-    console.error('Twitch EventSub list error:', error);
+    console.error('Twitch EventSub list error:', sanitizeError(error));
     return [];
   }
 }
