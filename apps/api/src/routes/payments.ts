@@ -258,13 +258,21 @@ router.post('/withdraw/:episodeId', requireStreamer, async (req: AuthenticatedRe
       throw new AppError('No funds available for withdrawal', 400, 'NO_FUNDS');
     }
 
+    // SECURITY: Calculate withdrawal amounts correctly
+    // The 'available' amount is the NET amount (after platform fee) that can be withdrawn.
+    // We need to calculate the corresponding GROSS amount for this withdrawal.
+    // Formula: netAmount = grossAmount * (1 - platformFeePercent/100)
+    // Therefore: grossAmount = netAmount / (1 - platformFeePercent/100)
+    const withdrawalGrossAmount = Math.round((available * 100) / (100 - PLATFORM_FEE_PERCENT));
+    const withdrawalPlatformFee = withdrawalGrossAmount - available;
+
     // Create withdrawal record
     const withdrawal = await prisma.withdrawal.create({
       data: {
         streamerId: req.user!.id,
         episodeId,
-        amount: grossAvailable - completedWithdrawals - pendingWithdrawals,
-        platformFee: calculatePlatformFee(grossAvailable - completedWithdrawals - pendingWithdrawals),
+        amount: withdrawalGrossAmount,
+        platformFee: withdrawalPlatformFee,
         netAmount: available,
         status: 'processing',
       },
