@@ -296,17 +296,22 @@ router.post('/withdraw/:episodeId', requireStreamer, async (req: AuthenticatedRe
         },
       });
     } catch (err: any) {
-      // Update withdrawal as failed
+      // Log the actual error for debugging (server-side only)
+      console.error('Stripe transfer failed:', err.message);
+
+      // Update withdrawal as failed (store details for internal use)
       await prisma.withdrawal.update({
         where: { id: withdrawal.id },
         data: {
           status: 'failed',
-          failedReason: err.message,
+          failedReason: err.message, // Stored for admin review, not exposed to client
         },
       });
 
+      // SECURITY: Don't expose raw Stripe error details to clients
+      // They may contain sensitive implementation details
       throw new AppError(
-        'Transfer failed: ' + err.message,
+        'Transfer failed. Please try again or contact support if the problem persists.',
         500,
         'TRANSFER_FAILED'
       );
