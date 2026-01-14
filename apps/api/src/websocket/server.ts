@@ -3,7 +3,7 @@ import { Server } from 'http';
 import jwt from 'jsonwebtoken';
 import { v4 as uuid } from 'uuid';
 import { prisma } from '../db/client.js';
-import type { ClientToServerEvent, ServerToClientEvent } from '@streamtree/shared';
+import type { ClientToServerEvent, ServerToClientEvent, Pattern } from '@streamtree/shared';
 import { sanitizeError } from '../utils/sanitize.js';
 
 interface AuthenticatedWebSocket extends WebSocket {
@@ -308,13 +308,13 @@ export async function broadcastStats(episodeId: string) {
       episodeId,
       cardsMinted: episode.cardsMinted,
       revenue: episode.totalRevenue,
-      leaderboard: leaderboard.map((card, index) => ({
+      leaderboard: leaderboard.map((card: typeof leaderboard[number], index: number) => ({
         rank: index + 1,
         cardId: card.id,
         // SECURITY: Don't expose internal user IDs - use username for display only
         username: card.holder.displayName || card.holder.username,
         markedSquares: card.markedSquares,
-        patterns: card.patterns as any[],
+        patterns: card.patterns as Pattern[],
       })),
     });
   } catch (error) {

@@ -73,7 +73,7 @@ async function validateTotalRevenueShare(
     select: { revenueShare: true },
   });
 
-  const currentTotal = collaborators.reduce((sum, c) => sum + c.revenueShare, 0);
+  const currentTotal = collaborators.reduce((sum: number, c: { revenueShare: number }) => sum + c.revenueShare, 0);
   const newTotal = currentTotal + newShare;
 
   if (newTotal > MAX_TOTAL_REVENUE_SHARE) {
@@ -109,8 +109,9 @@ router.get('/:episodeId', requireStreamer, async (req: AuthenticatedRequest, res
     }
 
     const isOwner = episode.streamerId === req.user!.id;
+    type Collaborator = typeof episode.collaborators[number];
     const isCollaborator = episode.collaborators.some(
-      (c) => c.userId === req.user!.id && c.status === 'accepted'
+      (c: Collaborator) => c.userId === req.user!.id && c.status === 'accepted'
     );
 
     if (!isOwner && !isCollaborator) {
@@ -119,7 +120,7 @@ router.get('/:episodeId', requireStreamer, async (req: AuthenticatedRequest, res
 
     res.json({
       success: true,
-      data: episode.collaborators.map((c) => ({
+      data: episode.collaborators.map((c: Collaborator) => ({
         id: c.id,
         user: c.user,
         role: c.role,
@@ -266,7 +267,7 @@ router.get('/invitations/pending', requireStreamer, async (req: AuthenticatedReq
 
     res.json({
       success: true,
-      data: invitations.map((inv) => ({
+      data: invitations.map((inv: typeof invitations[number]) => ({
         id: inv.id,
         role: inv.role,
         permissions: inv.permissions,
@@ -531,7 +532,7 @@ router.get('/my/collaborating', requireStreamer, async (req: AuthenticatedReques
 
     res.json({
       success: true,
-      data: collaborations.map((c) => ({
+      data: collaborations.map((c: typeof collaborations[number]) => ({
         id: c.id,
         role: c.role,
         permissions: c.permissions,

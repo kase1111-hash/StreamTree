@@ -36,7 +36,7 @@ router.get('/my', async (req: AuthenticatedRequest, res, next) => {
 
     res.json({
       success: true,
-      data: cards.map((card) => ({
+      data: cards.map((card: typeof cards[number]) => ({
         ...card,
         episode: {
           ...card.episode,
@@ -128,14 +128,15 @@ router.get('/:id', async (req: AuthenticatedRequest, res, next) => {
 // Mint a card for an episode
 router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => {
   try {
-    const episode = await prisma.episode.findUnique({
+    const episodeBase = await prisma.episode.findUnique({
       where: { id: req.params.episodeId },
       include: {
         eventDefinitions: {
           orderBy: { sortOrder: 'asc' },
         },
       },
-    }) as (typeof episode & { rootTokenId?: string | null }) | null;
+    });
+    const episode = episodeBase as (typeof episodeBase & { rootTokenId?: string | null }) | null;
 
     // Fetch rootTokenId separately for blockchain integration
     const episodeWithRoot = episode ? await prisma.episode.findUnique({
@@ -175,15 +176,16 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
     }
 
     // Generate the card grid
+    type EventDef = typeof episode.eventDefinitions[number];
     const grid = generateCardGrid(
-      episode.eventDefinitions.map((e) => ({
+      episode.eventDefinitions.map((e: EventDef) => ({
         id: e.id,
         episodeId: e.episodeId,
         name: e.name,
         icon: e.icon,
         description: e.description,
-        triggerType: e.triggerType as any,
-        triggerConfig: e.triggerConfig as any,
+        triggerType: e.triggerType as 'manual' | 'twitch' | 'custom',
+        triggerConfig: e.triggerConfig as Record<string, unknown> | null,
         firedAt: e.firedAt,
         firedCount: e.firedCount,
         createdAt: e.createdAt,
@@ -194,8 +196,8 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
 
     // Mark any already-fired events
     const firedEventIds = episode.eventDefinitions
-      .filter((e) => e.firedAt !== null)
-      .map((e) => e.id);
+      .filter((e: EventDef) => e.firedAt !== null)
+      .map((e: EventDef) => e.id);
 
     let markedCount = 0;
     for (let row = 0; row < grid.length; row++) {
@@ -318,7 +320,7 @@ router.get('/gallery/all', async (req: AuthenticatedRequest, res, next) => {
 
     res.json({
       success: true,
-      data: cards.map((card) => ({
+      data: cards.map((card: typeof cards[number]) => ({
         id: card.id,
         episodeId: card.episodeId,
         episodeName: card.episode.name,

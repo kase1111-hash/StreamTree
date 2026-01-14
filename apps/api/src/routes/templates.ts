@@ -48,13 +48,13 @@ router.get('/browse', async (req: AuthenticatedRequest, res, next) => {
 
     res.json({
       success: true,
-      data: templates.map((t) => ({
+      data: templates.map((t: typeof templates[number]) => ({
         id: t.id,
         name: t.name,
         description: t.description,
         category: t.category,
         gridSize: t.gridSize,
-        eventCount: (t.events as any[]).length,
+        eventCount: (t.events as unknown[]).length,
         usageCount: t.usageCount,
         createdAt: t.createdAt,
         creator: {
@@ -340,7 +340,8 @@ router.post('/from-episode/:episodeId', requireStreamer, async (req: Authenticat
     }
 
     // Convert events to template format
-    const events = episode.eventDefinitions.map((e) => ({
+    type EventDef = typeof episode.eventDefinitions[number];
+    const events = episode.eventDefinitions.map((e: EventDef) => ({
       name: e.name,
       icon: e.icon,
       description: e.description,
