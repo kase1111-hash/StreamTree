@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import { createServer } from 'http';
 import { prisma } from './db/client.js';
 import { setupWebSocket } from './websocket/server.js';
+import { sanitizeError } from './utils/sanitize.js';
 import { episodesRouter } from './routes/episodes.js';
 import { cardsRouter } from './routes/cards.js';
 import { usersRouter } from './routes/users.js';
@@ -119,7 +120,7 @@ async function start() {
       console.log(`WebSocket server ready`);
     });
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error('Failed to start server:', sanitizeError(error));
     process.exit(1);
   }
 }

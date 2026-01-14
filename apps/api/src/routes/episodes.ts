@@ -12,6 +12,7 @@ import {
   generateMetadataUri,
   getContractAddress,
 } from '../services/blockchain.service.js';
+import { sanitizeError, validateSafeUrl } from '../utils/sanitize.js';
 
 const router = Router();
 
@@ -179,7 +180,16 @@ router.patch('/:id', requireStreamer, async (req: AuthenticatedRequest, res, nex
     }
 
     if (artworkUrl !== undefined) {
-      updateData.artworkUrl = artworkUrl;
+      if (artworkUrl) {
+        // SECURITY: Validate URL to prevent XSS via javascript: URLs, etc.
+        const urlValidation = validateSafeUrl(artworkUrl, {
+          allowHttp: process.env.NODE_ENV === 'development',
+        });
+        if (!urlValidation.valid) {
+          throw new AppError(urlValidation.error!, 400, 'VALIDATION_ERROR');
+        }
+      }
+      updateData.artworkUrl = artworkUrl || null;
     }
 
     const updated = await prisma.episode.update({
@@ -277,7 +287,7 @@ router.post('/:id/launch', requireStreamer, async (req: AuthenticatedRequest, re
           console.log('Root token created:', rootTokenId, 'tx:', result.transactionHash);
         }
       } catch (error) {
-        console.error('Failed to mint root token, continuing without blockchain:', error);
+        console.error('Failed to mint root token, continuing without blockchain:', sanitizeError(error));
         // Continue without blockchain - don't block the launch
       }
     }
@@ -335,7 +345,7 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
         await endRootToken(episode.rootTokenId);
         console.log('Root token ended:', episode.rootTokenId);
       } catch (error) {
-        console.error('Failed to end root token:', error);
+        console.error('Failed to end root token:', sanitizeError(error));
         // Continue anyway
       }
     }
@@ -409,7 +419,7 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
             }
           }
         } catch (error) {
-          console.error('Failed to batch mint fruit tokens:', error);
+          console.error('Failed to batch mint fruit tokens:', sanitizeError(error));
           // Continue - update card status without blockchain tokens
         }
       }
@@ -488,7 +498,7 @@ router.get('/:id/stats', requireStreamer, async (req: AuthenticatedRequest, res,
         leaderboard: leaderboard.map((card, index) => ({
           rank: index + 1,
           cardId: card.id,
-          holderId: card.holderId,
+          // SECURITY: Don't expose internal user IDs - use username for display only
           username: card.holder.displayName || card.holder.username,
           markedSquares: card.markedSquares,
           patterns: card.patterns,
@@ -551,7 +561,7 @@ router.get('/:id/results', async (req: AuthenticatedRequest, res, next) => {
         leaderboard: leaderboard.map((card, index) => ({
           rank: index + 1,
           cardId: card.id,
-          holderId: card.holderId,
+          // SECURITY: Don't expose internal user IDs - use username for display only
           username: card.holder.displayName || card.holder.username,
           markedSquares: card.markedSquares,
           patterns: card.patterns,

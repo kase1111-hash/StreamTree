@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { v4 as uuid } from 'uuid';
 import { prisma } from '../db/client.js';
 import type { ClientToServerEvent, ServerToClientEvent } from '@streamtree/shared';
+import { sanitizeError } from '../utils/sanitize.js';
 
 interface AuthenticatedWebSocket extends WebSocket {
   id: string;
@@ -95,7 +96,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
     });
 
     client.on('error', (error) => {
-      console.error('WebSocket error:', error);
+      console.error('WebSocket error:', sanitizeError(error));
       cleanupConnection(client);
     });
   });
@@ -221,7 +222,7 @@ async function handleMarkSquare(
       code: 'NOT_ENABLED',
     });
   } catch (error) {
-    console.error('Error handling mark square:', error);
+    console.error('Error handling mark square:', sanitizeError(error));
     sendToClient(client, {
       type: 'error',
       message: 'Server error',
@@ -310,14 +311,14 @@ export async function broadcastStats(episodeId: string) {
       leaderboard: leaderboard.map((card, index) => ({
         rank: index + 1,
         cardId: card.id,
-        holderId: card.holderId,
+        // SECURITY: Don't expose internal user IDs - use username for display only
         username: card.holder.displayName || card.holder.username,
         markedSquares: card.markedSquares,
         patterns: card.patterns as any[],
       })),
     });
   } catch (error) {
-    console.error('Error broadcasting stats:', error);
+    console.error('Error broadcasting stats:', sanitizeError(error));
   }
 }
 

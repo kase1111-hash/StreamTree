@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
+import { sanitizeError } from '../utils/sanitize.js';
 import {
   stripe,
   createConnectedAccount,
@@ -36,7 +37,7 @@ router.get('/settings', requireStreamer, async (req: AuthenticatedRequest, res, 
       try {
         accountStatus = await getAccountStatus(user.stripeAccountId);
       } catch (err) {
-        console.error('Failed to get Stripe account status:', err);
+        console.error('Failed to get Stripe account status:', sanitizeError(err));
       }
     }
 

@@ -4,6 +4,7 @@ import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
 import { broadcastToEpisode, sendToUser } from '../websocket/server.js';
+import { sanitizeError } from '../utils/sanitize.js';
 
 const router = Router();
 
@@ -547,7 +548,7 @@ async function fireEventFromChat(
 
     console.log(`Chat keyword triggered: ${triggerData.keyword} for episode ${episodeId}, affected ${cardsAffected} cards`);
   } catch (error) {
-    console.error('Error firing chat event:', error);
+    console.error('Error firing chat event:', sanitizeError(error));
   }
 }
 

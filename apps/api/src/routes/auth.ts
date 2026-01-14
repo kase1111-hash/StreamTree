@@ -5,6 +5,7 @@ import { ethers } from 'ethers';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { generateShareCode } from '@streamtree/shared';
+import { sanitizeError } from '../utils/sanitize.js';
 
 // SECURITY: Cookie configuration for HttpOnly tokens
 const isProduction = process.env.NODE_ENV === 'production';
@@ -97,7 +98,7 @@ function verifyWalletSignature(message: string, signature: string, expectedAddre
     // Compare addresses (case-insensitive)
     return recoveredAddress.toLowerCase() === expectedAddress.toLowerCase();
   } catch (error) {
-    console.error('Wallet signature verification failed:', error);
+    console.error('Wallet signature verification failed:', sanitizeError(error));
     return false;
   }
 }
