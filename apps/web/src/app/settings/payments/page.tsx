@@ -9,7 +9,7 @@ import { clsx } from 'clsx';
 
 interface PaymentSettings {
   hasStripeAccount: boolean;
-  stripeAccountId: string | null;
+  // stripeAccountId removed for security - internal implementation detail
   chargesEnabled: boolean;
   payoutsEnabled: boolean;
   detailsSubmitted: boolean;

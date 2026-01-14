@@ -44,7 +44,8 @@ router.get('/settings', requireStreamer, async (req: AuthenticatedRequest, res, 
       success: true,
       data: {
         hasStripeAccount: !!user.stripeAccountId,
-        stripeAccountId: user.stripeAccountId,
+        // SECURITY: stripeAccountId removed - internal implementation detail
+        // that shouldn't be exposed to clients
         chargesEnabled: accountStatus?.chargesEnabled || user.stripeChargesEnabled,
         payoutsEnabled: accountStatus?.payoutsEnabled || user.stripePayoutsEnabled,
         detailsSubmitted: accountStatus?.detailsSubmitted || false,
