@@ -34,19 +34,79 @@ const app = express();
 const httpServer = createServer(app);
 
 // CORS Configuration
-// SECURITY: In production, CORS_ORIGIN must be explicitly set
-const corsOrigin = process.env.CORS_ORIGIN;
+// SECURITY: Validate and configure CORS origins
+const corsOriginEnv = process.env.CORS_ORIGIN;
 const isProduction = process.env.NODE_ENV === 'production';
 
-if (isProduction && !corsOrigin) {
-  console.error('SECURITY WARNING: CORS_ORIGIN must be set in production!');
-  console.error('Falling back to restrictive CORS (no cross-origin requests allowed)');
+/**
+ * SECURITY: Validate and parse CORS origins
+ * - Prevents wildcard (*) with credentials (insecure and browsers reject it)
+ * - Validates URL format for each origin
+ * - Supports comma-separated multiple origins
+ */
+function validateCorsOrigins(originEnv: string | undefined): string | string[] | false {
+  if (!originEnv) {
+    return false;
+  }
+
+  // SECURITY: Reject wildcard - it's incompatible with credentials:true
+  // and would indicate a misconfiguration
+  if (originEnv === '*') {
+    console.error('SECURITY ERROR: CORS_ORIGIN=* is not allowed with credentials.');
+    console.error('Please specify explicit origins (e.g., https://example.com)');
+    return false;
+  }
+
+  // Support comma-separated origins
+  const origins = originEnv.split(',').map(o => o.trim()).filter(Boolean);
+
+  // Validate each origin
+  const validOrigins: string[] = [];
+  for (const origin of origins) {
+    try {
+      const url = new URL(origin);
+      // SECURITY: In production, require HTTPS (except localhost for testing)
+      if (isProduction && url.protocol !== 'https:' && !url.hostname.includes('localhost')) {
+        console.error(`SECURITY WARNING: Non-HTTPS origin in production: ${origin}`);
+        continue;
+      }
+      validOrigins.push(origin);
+    } catch {
+      console.error(`SECURITY WARNING: Invalid CORS origin URL: ${origin}`);
+    }
+  }
+
+  if (validOrigins.length === 0) {
+    return false;
+  }
+
+  return validOrigins.length === 1 ? validOrigins[0] : validOrigins;
+}
+
+// Validate configured origins
+const validatedOrigins = validateCorsOrigins(corsOriginEnv);
+
+// Determine final CORS origin setting
+let corsOrigin: string | string[] | boolean;
+if (isProduction) {
+  if (!validatedOrigins) {
+    console.error('SECURITY WARNING: No valid CORS_ORIGIN set in production!');
+    console.error('Falling back to restrictive CORS (no cross-origin requests allowed)');
+  }
+  corsOrigin = validatedOrigins || false;
+} else {
+  // Development mode
+  if (validatedOrigins) {
+    corsOrigin = validatedOrigins;
+  } else {
+    // Default to localhost in development only
+    console.log('CORS: Using default localhost:3000 for development');
+    corsOrigin = 'http://localhost:3000';
+  }
 }
 
 app.use(cors({
-  origin: isProduction
-    ? corsOrigin || false // In production: require explicit origin or block all
-    : corsOrigin || 'http://localhost:3000', // In development: allow localhost fallback
+  origin: corsOrigin,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Requested-With'],
