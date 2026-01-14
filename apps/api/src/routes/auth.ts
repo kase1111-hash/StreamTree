@@ -19,15 +19,45 @@ const COOKIE_OPTIONS = {
 const ACCESS_TOKEN_COOKIE = 'streamtree_access_token';
 const REFRESH_TOKEN_COOKIE = 'streamtree_refresh_token';
 
+// SECURITY: Session timeout configuration
+// Absolute session timeout - user must re-authenticate after this period
+// regardless of refresh token validity. Prevents indefinite session extension.
+const ABSOLUTE_SESSION_TIMEOUT_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+/**
+ * Parse JWT expiry string (e.g., '1h', '30m', '7d') to milliseconds
+ */
+function parseExpiryToMs(expiry: string): number {
+  const match = expiry.match(/^(\d+)([smhd])$/);
+  if (!match) {
+    return 60 * 60 * 1000; // Default 1 hour
+  }
+
+  const value = parseInt(match[1], 10);
+  const unit = match[2];
+
+  switch (unit) {
+    case 's': return value * 1000;
+    case 'm': return value * 60 * 1000;
+    case 'h': return value * 60 * 60 * 1000;
+    case 'd': return value * 24 * 60 * 60 * 1000;
+    default: return 60 * 60 * 1000;
+  }
+}
+
+// Parse JWT expiry once at startup
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
+const JWT_EXPIRY_MS = parseExpiryToMs(JWT_EXPIRES_IN);
+
 /**
  * SECURITY: Set authentication cookies with HttpOnly flag
  * This prevents XSS attacks from stealing tokens via JavaScript
  */
 function setAuthCookies(res: Response, accessToken: string, refreshToken: string) {
-  // Access token: shorter expiry (1 hour)
+  // Access token: expiry synced with JWT_EXPIRES_IN configuration
   res.cookie(ACCESS_TOKEN_COOKIE, accessToken, {
     ...COOKIE_OPTIONS,
-    maxAge: 60 * 60 * 1000, // 1 hour
+    maxAge: JWT_EXPIRY_MS,
   });
 
   // Refresh token: longer expiry (7 days)
@@ -107,8 +137,6 @@ const router = Router();
 
 // Generate JWT tokens
 function generateTokens(user: { id: string; username: string; isStreamer: boolean }) {
-  const expiresIn = (process.env.JWT_EXPIRES_IN || '1h') as jwt.SignOptions['expiresIn'];
-
   const token = jwt.sign(
     {
       userId: user.id,
@@ -116,7 +144,7 @@ function generateTokens(user: { id: string; username: string; isStreamer: boolea
       isStreamer: user.isStreamer,
     },
     JWT_SECRET,
-    { expiresIn }
+    { expiresIn: JWT_EXPIRES_IN }
   );
 
   const refreshToken = uuid();
@@ -299,6 +327,16 @@ router.post('/refresh', async (req, res, next) => {
       throw new AppError('Invalid or expired refresh token', 401, 'INVALID_TOKEN');
     }
 
+    // SECURITY: Check absolute session timeout
+    // Prevents indefinite session extension via token refresh
+    const sessionAge = Date.now() - storedToken.createdAt.getTime();
+    if (sessionAge > ABSOLUTE_SESSION_TIMEOUT_MS) {
+      // Session has exceeded absolute timeout, force re-authentication
+      await prisma.refreshToken.delete({ where: { id: storedToken.id } });
+      clearAuthCookies(res);
+      throw new AppError('Session expired. Please log in again.', 401, 'SESSION_EXPIRED');
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: storedToken.userId },
     });
@@ -316,12 +354,14 @@ router.post('/refresh', async (req, res, next) => {
     // Generate new tokens
     const tokens = generateTokens(user);
 
-    // Store new refresh token
+    // Store new refresh token - preserve original session creation time for absolute timeout
     await prisma.refreshToken.create({
       data: {
         userId: user.id,
         token: tokens.refreshToken,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+        // SECURITY: Preserve original session start time to enforce absolute timeout
+        createdAt: storedToken.createdAt,
       },
     });
 

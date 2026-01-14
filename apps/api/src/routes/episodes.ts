@@ -445,7 +445,8 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
 });
 
 // Get episode stats
-router.get('/:id/stats', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
+// Note: Uses authMiddleware (applied globally) + internal auth check for owner/collaborator access
+router.get('/:id/stats', async (req: AuthenticatedRequest, res, next) => {
   try {
     const episode = await prisma.episode.findUnique({
       where: { id: req.params.id },
@@ -720,7 +721,8 @@ router.delete('/:id/events/:eventId', requireStreamer, async (req: Authenticated
 });
 
 // Fire event
-router.post('/:id/events/:eventId/fire', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
+// Note: Uses authMiddleware (applied globally) + internal auth check for owner/collaborator access
+router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, next) => {
   try {
     const episode = await prisma.episode.findUnique({
       where: { id: req.params.id },
