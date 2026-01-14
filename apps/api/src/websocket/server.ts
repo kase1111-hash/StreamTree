@@ -311,7 +311,7 @@ export async function broadcastStats(episodeId: string) {
       leaderboard: leaderboard.map((card, index) => ({
         rank: index + 1,
         cardId: card.id,
-        holderId: card.holderId,
+        // SECURITY: Don't expose internal user IDs - use username for display only
         username: card.holder.displayName || card.holder.username,
         markedSquares: card.markedSquares,
         patterns: card.patterns as any[],

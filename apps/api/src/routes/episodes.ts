@@ -489,7 +489,7 @@ router.get('/:id/stats', requireStreamer, async (req: AuthenticatedRequest, res,
         leaderboard: leaderboard.map((card, index) => ({
           rank: index + 1,
           cardId: card.id,
-          holderId: card.holderId,
+          // SECURITY: Don't expose internal user IDs - use username for display only
           username: card.holder.displayName || card.holder.username,
           markedSquares: card.markedSquares,
           patterns: card.patterns,
@@ -552,7 +552,7 @@ router.get('/:id/results', async (req: AuthenticatedRequest, res, next) => {
         leaderboard: leaderboard.map((card, index) => ({
           rank: index + 1,
           cardId: card.id,
-          holderId: card.holderId,
+          // SECURITY: Don't expose internal user IDs - use username for display only
           username: card.holder.displayName || card.holder.username,
           markedSquares: card.markedSquares,
           patterns: card.patterns,
