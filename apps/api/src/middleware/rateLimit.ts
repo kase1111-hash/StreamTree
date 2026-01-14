@@ -138,3 +138,24 @@ export const metadataRateLimiter = rateLimit({
     res.status(429).json(options.message);
   },
 });
+
+/**
+ * Strict rate limiter for username availability checks
+ * Prevents user enumeration attacks by limiting check frequency
+ */
+export const usernameCheckRateLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 10, // 10 checks per minute per IP (prevents mass enumeration)
+  message: {
+    success: false,
+    error: {
+      message: 'Too many username checks. Please slow down.',
+      code: 'RATE_LIMIT_EXCEEDED',
+    },
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req, res, next, options) => {
+    res.status(429).json(options.message);
+  },
+});
