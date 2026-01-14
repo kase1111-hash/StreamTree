@@ -1,6 +1,16 @@
 import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
+import { usernameCheckRateLimiter } from '../middleware/rateLimit.js';
+
+/**
+ * SECURITY: Add random delay to prevent timing-based enumeration
+ * Returns a promise that resolves after a random delay between min and max ms
+ */
+function randomDelay(minMs: number = 50, maxMs: number = 150): Promise<void> {
+  const delay = Math.floor(Math.random() * (maxMs - minMs + 1)) + minMs;
+  return new Promise(resolve => setTimeout(resolve, delay));
+}
 
 const router = Router();
 
@@ -105,9 +115,15 @@ router.get('/episode/:shareCode/leaderboard', async (req, res, next) => {
 });
 
 // Check if username is available
-router.get('/username-available/:username', async (req, res, next) => {
+// SECURITY: Stricter rate limiting (10/min) and timing randomization to prevent enumeration
+router.get('/username-available/:username', usernameCheckRateLimiter, async (req, res, next) => {
   try {
     const { username } = req.params;
+
+    // SECURITY: Add random delay to prevent timing-based enumeration
+    // This makes it harder to distinguish between "user exists" and "user doesn't exist"
+    // based on response timing differences
+    await randomDelay(50, 150);
 
     if (!username || username.length < 3) {
       return res.json({ success: true, data: { available: false } });
