@@ -750,6 +750,17 @@ router.post('/:id/events/:eventId/fire', requireStreamer, async (req: Authentica
       throw new AppError('Event not found', 404, 'NOT_FOUND');
     }
 
+    // Security: Only allow manual firing of events with triggerType 'manual'
+    // Events with other trigger types (e.g., 'twitch', 'chat') should only
+    // be fired through their designated automated channels
+    if (event.triggerType !== 'manual') {
+      throw new AppError(
+        'This event cannot be manually fired',
+        403,
+        'FORBIDDEN'
+      );
+    }
+
     // Get all cards for this episode
     const cards = await prisma.card.findMany({
       where: { episodeId: episode.id, status: 'active' },
