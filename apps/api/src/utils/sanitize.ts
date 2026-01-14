@@ -107,3 +107,80 @@ export function sanitizeForLogging(obj: unknown): unknown {
 export function getLogSafeError(context: string, error: unknown): string {
   return `${context}: ${sanitizeError(error)}`;
 }
+
+/**
+ * Dangerous URL protocols that should never be allowed
+ */
+const DANGEROUS_PROTOCOLS = [
+  'javascript:',
+  'data:',
+  'vbscript:',
+  'file:',
+  'ftp:',
+];
+
+/**
+ * Validate that a URL is safe for use (e.g., avatar URLs, artwork URLs)
+ *
+ * SECURITY: This prevents:
+ * - XSS via javascript: URLs
+ * - Data exfiltration via data: URLs
+ * - Local file access via file: URLs
+ * - Protocol abuse via other dangerous schemes
+ *
+ * @param url - The URL to validate
+ * @param options - Validation options
+ * @returns Object with valid flag and optional error message
+ */
+export function validateSafeUrl(
+  url: string,
+  options: {
+    allowHttp?: boolean;  // Allow http:// (default: false, only https allowed)
+    maxLength?: number;   // Maximum URL length (default: 2048)
+  } = {}
+): { valid: boolean; error?: string } {
+  const { allowHttp = false, maxLength = 2048 } = options;
+
+  // Check for empty or whitespace-only URLs
+  if (!url || !url.trim()) {
+    return { valid: false, error: 'URL cannot be empty' };
+  }
+
+  // Check length
+  if (url.length > maxLength) {
+    return { valid: false, error: `URL exceeds maximum length of ${maxLength} characters` };
+  }
+
+  // Normalize and check for dangerous protocols
+  const normalizedUrl = url.toLowerCase().trim();
+
+  for (const protocol of DANGEROUS_PROTOCOLS) {
+    if (normalizedUrl.startsWith(protocol)) {
+      return { valid: false, error: 'URL uses a prohibited protocol' };
+    }
+  }
+
+  // Try to parse as URL
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return { valid: false, error: 'Invalid URL format' };
+  }
+
+  // Check protocol
+  if (parsedUrl.protocol === 'https:') {
+    return { valid: true };
+  }
+
+  if (parsedUrl.protocol === 'http:' && allowHttp) {
+    return { valid: true };
+  }
+
+  return {
+    valid: false,
+    error: allowHttp
+      ? 'URL must use http:// or https:// protocol'
+      : 'URL must use https:// protocol'
+  };
+}

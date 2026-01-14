@@ -3,6 +3,7 @@ import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { isValidAddress } from '../services/blockchain.service.js';
+import { validateSafeUrl } from '../utils/sanitize.js';
 
 const router = Router();
 
@@ -60,6 +61,15 @@ router.patch('/me', async (req: AuthenticatedRequest, res, next) => {
     }
 
     if (avatarUrl !== undefined) {
+      if (avatarUrl) {
+        // SECURITY: Validate URL to prevent XSS via javascript: URLs, etc.
+        const urlValidation = validateSafeUrl(avatarUrl, {
+          allowHttp: process.env.NODE_ENV === 'development',
+        });
+        if (!urlValidation.valid) {
+          throw new AppError(urlValidation.error!, 400, 'VALIDATION_ERROR');
+        }
+      }
       updateData.avatarUrl = avatarUrl || null;
     }
 

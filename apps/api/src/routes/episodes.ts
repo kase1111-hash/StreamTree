@@ -12,7 +12,7 @@ import {
   generateMetadataUri,
   getContractAddress,
 } from '../services/blockchain.service.js';
-import { sanitizeError } from '../utils/sanitize.js';
+import { sanitizeError, validateSafeUrl } from '../utils/sanitize.js';
 
 const router = Router();
 
@@ -180,7 +180,16 @@ router.patch('/:id', requireStreamer, async (req: AuthenticatedRequest, res, nex
     }
 
     if (artworkUrl !== undefined) {
-      updateData.artworkUrl = artworkUrl;
+      if (artworkUrl) {
+        // SECURITY: Validate URL to prevent XSS via javascript: URLs, etc.
+        const urlValidation = validateSafeUrl(artworkUrl, {
+          allowHttp: process.env.NODE_ENV === 'development',
+        });
+        if (!urlValidation.valid) {
+          throw new AppError(urlValidation.error!, 400, 'VALIDATION_ERROR');
+        }
+      }
+      updateData.artworkUrl = artworkUrl || null;
     }
 
     const updated = await prisma.episode.update({
