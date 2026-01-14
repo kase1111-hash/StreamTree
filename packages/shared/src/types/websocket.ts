@@ -13,15 +13,19 @@ export interface EventFiredEvent {
   episodeId: string;
   eventId: string;
   eventName: string;
-  timestamp: string;
+  timestamp?: string;
+  triggeredBy?: string;
+  cardsAffected?: number;
+  twitchInfo?: { title: string; description: string };
+  chatInfo?: { keyword: string; username?: string };
 }
 
 export interface CardUpdatedEvent {
   type: 'card:updated';
   cardId: string;
-  markedSquares: GridSquare[];
-  newPatterns: Pattern[];
-  totalMarked: number;
+  markedSquares: number;
+  patterns: Pattern[];
+  triggeredBy?: string;
 }
 
 export interface StatsUpdateEvent {
@@ -49,6 +53,24 @@ export interface ConnectedEvent {
   connectionId: string;
 }
 
+export interface PaymentRefundedEvent {
+  type: 'payment:refunded';
+  cardId?: string;
+  episodeId: string;
+  amount?: number;
+  reason?: string;
+  message?: string;
+  refundId?: string;
+}
+
+export interface CardMintedEvent {
+  type: 'card:minted';
+  cardId: string;
+  episodeId: string;
+  holderId?: string;
+  cardNumber: number;
+}
+
 export type ServerToClientEvent =
   | EpisodeStateEvent
   | EventFiredEvent
@@ -56,7 +78,9 @@ export type ServerToClientEvent =
   | StatsUpdateEvent
   | CardFruitedEvent
   | ErrorEvent
-  | ConnectedEvent;
+  | ConnectedEvent
+  | PaymentRefundedEvent
+  | CardMintedEvent;
 
 // Client -> Server Events
 

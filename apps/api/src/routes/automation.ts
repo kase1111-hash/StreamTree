@@ -34,7 +34,7 @@ router.get('/webhooks/:episodeId', requireStreamer, async (req: AuthenticatedReq
 
     res.json({
       success: true,
-      data: webhooks.map((w) => ({
+      data: webhooks.map((w: { id: string; name: string; isActive: boolean; createdAt: Date; lastUsedAt: Date | null; usageCount: number }) => ({
         id: w.id,
         name: w.name,
         isActive: w.isActive,

@@ -143,7 +143,7 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
 
   // Generate card grid
   const grid = generateCardGrid(
-    episode.eventDefinitions.map((e) => ({
+    episode.eventDefinitions.map((e: { id: string; name: string; icon: string }) => ({
       id: e.id,
       name: e.name,
       icon: e.icon,
@@ -283,7 +283,7 @@ async function handleTwitchNotification(payload: any) {
   // Fire events on all matching episodes
   for (const episode of episodes) {
     // Find matching event definitions
-    const matchingEvents = episode.eventDefinitions.filter((eventDef) => {
+    const matchingEvents = episode.eventDefinitions.filter((eventDef: { id: string; triggerType: string; triggerConfig: unknown }) => {
       if (eventDef.triggerType !== 'twitch') return false;
 
       const config = eventDef.triggerConfig as any;
@@ -525,11 +525,11 @@ router.post('/custom/:webhookId', async (req: Request, res: Response) => {
   const { eventName, eventId } = req.body;
 
   // Find matching event
-  let targetEvent = webhook.episode.eventDefinitions.find((e) => e.id === eventId);
+  let targetEvent = webhook.episode.eventDefinitions.find((e: { id: string; name: string }) => e.id === eventId);
 
   if (!targetEvent && eventName) {
     targetEvent = webhook.episode.eventDefinitions.find(
-      (e) => e.name.toLowerCase() === eventName.toLowerCase()
+      (e: { id: string; name: string }) => e.name.toLowerCase() === eventName.toLowerCase()
     );
   }
 

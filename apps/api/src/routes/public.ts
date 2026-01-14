@@ -101,12 +101,12 @@ router.get('/episode/:shareCode/leaderboard', async (req, res, next) => {
 
     res.json({
       success: true,
-      data: leaderboard.map((card, index) => ({
+      data: leaderboard.map((card: typeof leaderboard[number], index: number) => ({
         rank: index + 1,
         cardId: card.id,
         username: card.holder.displayName || card.holder.username,
         markedSquares: card.markedSquares,
-        patterns: (card.patterns as any[]).length,
+        patterns: (card.patterns as unknown[]).length,
       })),
     });
   } catch (error) {

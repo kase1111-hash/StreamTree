@@ -143,14 +143,15 @@ router.get('/earnings', requireStreamer, async (req: AuthenticatedRequest, res, 
     let totalWithdrawn = 0;
     let pendingWithdrawals = 0;
 
-    const episodeSummaries = episodes.map((ep) => {
+    type WithdrawalInfo = { id: string; amount: number; netAmount: number; status: string };
+    const episodeSummaries = episodes.map((ep: { id: string; name: string; status: string; totalRevenue: number; cardsMinted: number; endedAt: Date | null; withdrawals: WithdrawalInfo[] }) => {
       const withdrawn = ep.withdrawals
-        .filter((w) => w.status === 'completed')
-        .reduce((sum, w) => sum + w.netAmount, 0);
+        .filter((w: WithdrawalInfo) => w.status === 'completed')
+        .reduce((sum: number, w: WithdrawalInfo) => sum + w.netAmount, 0);
 
       const pending = ep.withdrawals
-        .filter((w) => w.status === 'pending' || w.status === 'processing')
-        .reduce((sum, w) => sum + w.netAmount, 0);
+        .filter((w: WithdrawalInfo) => w.status === 'pending' || w.status === 'processing')
+        .reduce((sum: number, w: WithdrawalInfo) => sum + w.netAmount, 0);
 
       const available = ep.status === 'ended'
         ? calculateStreamerPayout(ep.totalRevenue) - withdrawn - pending
@@ -241,13 +242,14 @@ router.post('/withdraw/:episodeId', requireStreamer, async (req: AuthenticatedRe
     }
 
     // Calculate available amount
+    type WithdrawalRecord = { status: string; netAmount: number };
     const completedWithdrawals = episode.withdrawals
-      .filter((w) => w.status === 'completed')
-      .reduce((sum, w) => sum + w.netAmount, 0);
+      .filter((w: WithdrawalRecord) => w.status === 'completed')
+      .reduce((sum: number, w: WithdrawalRecord) => sum + w.netAmount, 0);
 
     const pendingWithdrawals = episode.withdrawals
-      .filter((w) => w.status === 'pending' || w.status === 'processing')
-      .reduce((sum, w) => sum + w.netAmount, 0);
+      .filter((w: WithdrawalRecord) => w.status === 'pending' || w.status === 'processing')
+      .reduce((sum: number, w: WithdrawalRecord) => sum + w.netAmount, 0);
 
     const grossAvailable = episode.totalRevenue;
     const platformFee = calculatePlatformFee(grossAvailable);
@@ -345,7 +347,7 @@ router.get('/withdrawals', requireStreamer, async (req: AuthenticatedRequest, re
 
     res.json({
       success: true,
-      data: withdrawals.map((w) => ({
+      data: withdrawals.map((w: { id: string; episodeId: string; episode: { id: string; name: string }; amount: number; platformFee: number; netAmount: number; status: string; createdAt: Date; completedAt: Date | null }) => ({
         id: w.id,
         episodeId: w.episodeId,
         episodeName: w.episode.name,

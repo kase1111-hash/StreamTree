@@ -119,7 +119,7 @@ async function getAllWebhookSecrets(): Promise<string[]> {
     }
     secretsCacheInitialized = true;
 
-    return subscriptions.map(s => s.secret);
+    return subscriptions.map((s: { subscriptionId: string; secret: string }) => s.secret);
   } catch (error) {
     console.error('Failed to fetch webhook secrets from database:', sanitizeError(error));
     return [];
@@ -181,7 +181,7 @@ export async function exchangeCode(code: string): Promise<TwitchTokenResponse | 
       return null;
     }
 
-    return await response.json();
+    return await response.json() as TwitchTokenResponse;
   } catch (error) {
     console.error('Twitch token exchange error:', sanitizeError(error));
     return null;
@@ -212,7 +212,7 @@ export async function refreshToken(refreshToken: string): Promise<TwitchTokenRes
       return null;
     }
 
-    return await response.json();
+    return await response.json() as TwitchTokenResponse;
   } catch (error) {
     console.error('Twitch token refresh error:', sanitizeError(error));
     return null;
@@ -237,7 +237,7 @@ export async function getUser(accessToken: string): Promise<TwitchUser | null> {
       return null;
     }
 
-    const data = await response.json();
+    const data = await response.json() as { data: TwitchUser[] };
     return data.data[0] || null;
   } catch (error) {
     console.error('Twitch get user error:', sanitizeError(error));
@@ -268,7 +268,7 @@ async function getAppAccessToken(): Promise<string | null> {
       return null;
     }
 
-    const data = await response.json();
+    const data = await response.json() as { access_token: string };
     return data.access_token;
   } catch (error) {
     console.error('Twitch app token error:', sanitizeError(error));
@@ -317,7 +317,7 @@ export async function createEventSubSubscription(
       return null;
     }
 
-    const data = await response.json();
+    const data = await response.json() as { data: EventSubSubscription[] };
     const subscription = data.data[0];
 
     // Store secret in database for persistence across server restarts
@@ -414,7 +414,7 @@ export async function listEventSubSubscriptions(): Promise<EventSubSubscription[
       return [];
     }
 
-    const data = await response.json();
+    const data = await response.json() as { data: EventSubSubscription[] };
     return data.data || [];
   } catch (error) {
     console.error('Twitch EventSub list error:', sanitizeError(error));
@@ -504,7 +504,7 @@ export async function setupEpisodeSubscriptions(
   const subscriptions: { type: string; subscriptionId: string }[] = [];
 
   // Define the event types we want to subscribe to
-  const eventTypes = [
+  const eventTypes: Array<{ type: string; version: string; condition: Record<string, string> }> = [
     { type: 'channel.follow', version: '2', condition: { broadcaster_user_id: twitchUserId, moderator_user_id: twitchUserId } },
     { type: 'channel.subscribe', version: '1', condition: { broadcaster_user_id: twitchUserId } },
     { type: 'channel.subscription.gift', version: '1', condition: { broadcaster_user_id: twitchUserId } },

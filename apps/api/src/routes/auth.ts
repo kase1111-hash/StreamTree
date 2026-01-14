@@ -46,8 +46,9 @@ function parseExpiryToMs(expiry: string): number {
 }
 
 // Parse JWT expiry once at startup
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '1h';
-const JWT_EXPIRY_MS = parseExpiryToMs(JWT_EXPIRES_IN);
+const JWT_EXPIRES_IN_RAW = process.env.JWT_EXPIRES_IN || '1h';
+const JWT_EXPIRES_IN = JWT_EXPIRES_IN_RAW as jwt.SignOptions['expiresIn'];
+const JWT_EXPIRY_MS = parseExpiryToMs(JWT_EXPIRES_IN_RAW);
 
 /**
  * SECURITY: Set authentication cookies with HttpOnly flag

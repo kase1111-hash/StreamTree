@@ -29,6 +29,7 @@ export interface AuthenticatedRequest extends Request {
     id: string;
     username: string;
     isStreamer: boolean;
+    walletAddress: string | null;
   };
 }
 
@@ -59,7 +60,7 @@ export async function authMiddleware(
     // Verify user still exists
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, username: true, isStreamer: true },
+      select: { id: true, username: true, isStreamer: true, walletAddress: true },
     });
 
     if (!user) {

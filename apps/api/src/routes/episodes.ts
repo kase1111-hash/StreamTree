@@ -31,7 +31,7 @@ router.get('/', requireStreamer, async (req: AuthenticatedRequest, res, next) =>
 
     res.json({
       success: true,
-      data: episodes.map((ep) => ({
+      data: episodes.map((ep: typeof episodes[number]) => ({
         ...ep,
         cardsCount: ep._count.cards,
         eventsCount: ep._count.eventDefinitions,
@@ -371,7 +371,8 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
     // Batch mint fruit tokens if blockchain is configured
     if (isBlockchainConfigured() && cards.length > 0) {
       // Filter cards that have branch tokens
-      const cardsWithBranches = cards.filter((c) => c.branchTokenId);
+      type CardWithBranch = typeof cards[number];
+      const cardsWithBranches = cards.filter((c: CardWithBranch) => c.branchTokenId);
 
       if (cardsWithBranches.length > 0) {
         try {
@@ -381,10 +382,10 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
           for (let i = 0; i < cardsWithBranches.length; i += BATCH_SIZE) {
             const batch = cardsWithBranches.slice(i, i + BATCH_SIZE);
 
-            const branchTokenIds = batch.map((c) => c.branchTokenId!);
-            const finalScores = batch.map((c) => c.markedSquares);
-            const patterns = batch.map((c) => (c.patterns as any[]).length);
-            const metadataUris = batch.map((c) =>
+            const branchTokenIds = batch.map((c: CardWithBranch) => c.branchTokenId!);
+            const finalScores = batch.map((c: CardWithBranch) => c.markedSquares);
+            const patterns = batch.map((c: CardWithBranch) => (c.patterns as unknown[]).length);
+            const metadataUris = batch.map((c: CardWithBranch) =>
               generateMetadataUri('fruit', c.id, {
                 cardId: c.id,
                 episodeId: episode.id,
@@ -496,7 +497,7 @@ router.get('/:id/stats', async (req: AuthenticatedRequest, res, next) => {
         cardsMinted: episode.cardsMinted,
         totalRevenue: episode.totalRevenue,
         eventsTriggered,
-        leaderboard: leaderboard.map((card, index) => ({
+        leaderboard: leaderboard.map((card: typeof leaderboard[number], index: number) => ({
           rank: index + 1,
           cardId: card.id,
           // SECURITY: Don't expose internal user IDs - use username for display only
@@ -559,7 +560,7 @@ router.get('/:id/results', async (req: AuthenticatedRequest, res, next) => {
         streamer: episode.streamer,
         eventsFired: episode.firedEvents.length,
         totalEvents: episode.eventDefinitions.length,
-        leaderboard: leaderboard.map((card, index) => ({
+        leaderboard: leaderboard.map((card: typeof leaderboard[number], index: number) => ({
           rank: index + 1,
           cardId: card.id,
           // SECURITY: Don't expose internal user IDs - use username for display only
@@ -817,9 +818,9 @@ router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, 
         broadcastToEpisode(episode.id, {
           type: 'card:updated',
           cardId: card.id,
-          markedSquares: grid.flat().filter((sq) => sq.eventId === event.id && sq.marked),
-          newPatterns: patterns,
-          totalMarked: markedCount,
+          markedSquares: markedCount,
+          patterns,
+          triggeredBy: 'manual',
         });
       }
     }

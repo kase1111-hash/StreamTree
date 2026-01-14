@@ -152,8 +152,8 @@ router.get('/me/stats', async (req: AuthenticatedRequest, res, next) => {
         prisma.episode.count({ where: { streamerId: req.user!.id, status: 'live' } }),
       ]);
 
-    const totalPatterns = patternsCompleted.reduce((sum, card) => {
-      return sum + (card.patterns as any[]).length;
+    const totalPatterns = patternsCompleted.reduce((sum: number, card: { patterns: unknown }) => {
+      return sum + (card.patterns as unknown[]).length;
     }, 0);
 
     res.json({
