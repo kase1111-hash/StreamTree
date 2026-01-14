@@ -11,6 +11,80 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   moderator: ['fire_events', 'view_stats'],
 };
 
+// Maximum revenue share per collaborator and total across all collaborators
+const MAX_REVENUE_SHARE_PER_COLLABORATOR = 50; // 50% max per person
+const MAX_TOTAL_REVENUE_SHARE = 90; // Leave at least 10% for episode owner
+
+/**
+ * Validate revenue share value
+ * @param value - The revenue share value to validate
+ * @returns Validated integer between 0 and MAX_REVENUE_SHARE_PER_COLLABORATOR
+ * @throws AppError if value is invalid
+ */
+function validateRevenueShare(value: unknown): number {
+  // Handle undefined/null - default to 0
+  if (value === undefined || value === null) {
+    return 0;
+  }
+
+  // Must be a number
+  const numValue = typeof value === 'number' ? value : parseFloat(String(value));
+
+  if (isNaN(numValue)) {
+    throw new AppError('Revenue share must be a valid number', 400, 'VALIDATION_ERROR');
+  }
+
+  // Must be a non-negative integer
+  if (!Number.isInteger(numValue) || numValue < 0) {
+    throw new AppError('Revenue share must be a non-negative integer', 400, 'VALIDATION_ERROR');
+  }
+
+  // Clamp to maximum
+  if (numValue > MAX_REVENUE_SHARE_PER_COLLABORATOR) {
+    throw new AppError(
+      `Revenue share cannot exceed ${MAX_REVENUE_SHARE_PER_COLLABORATOR}%`,
+      400,
+      'VALIDATION_ERROR'
+    );
+  }
+
+  return numValue;
+}
+
+/**
+ * Check if adding a new revenue share would exceed the total limit
+ * @param episodeId - Episode to check
+ * @param newShare - New revenue share to add
+ * @param excludeCollaboratorId - Collaborator ID to exclude (for updates)
+ * @throws AppError if total would exceed limit
+ */
+async function validateTotalRevenueShare(
+  episodeId: string,
+  newShare: number,
+  excludeCollaboratorId?: string
+): Promise<void> {
+  // Get all active collaborators' revenue shares
+  const collaborators = await prisma.episodeCollaborator.findMany({
+    where: {
+      episodeId,
+      status: 'accepted',
+      ...(excludeCollaboratorId ? { id: { not: excludeCollaboratorId } } : {}),
+    },
+    select: { revenueShare: true },
+  });
+
+  const currentTotal = collaborators.reduce((sum, c) => sum + c.revenueShare, 0);
+  const newTotal = currentTotal + newShare;
+
+  if (newTotal > MAX_TOTAL_REVENUE_SHARE) {
+    throw new AppError(
+      `Total revenue share would exceed ${MAX_TOTAL_REVENUE_SHARE}%. Current total: ${currentTotal}%, requested: ${newShare}%`,
+      400,
+      'VALIDATION_ERROR'
+    );
+  }
+}
+
 // Get collaborators for an episode
 router.get('/:episodeId', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
   try {
@@ -65,7 +139,10 @@ router.get('/:episodeId', requireStreamer, async (req: AuthenticatedRequest, res
 router.post('/:episodeId/invite', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { episodeId } = req.params;
-    const { username, role = 'co-host', permissions, revenueShare = 0 } = req.body;
+    const { username, role = 'co-host', permissions, revenueShare: rawRevenueShare } = req.body;
+
+    // Validate revenue share before any other operations
+    const revenueShare = validateRevenueShare(rawRevenueShare);
 
     // Verify episode ownership
     const episode = await prisma.episode.findUnique({
@@ -79,6 +156,9 @@ router.post('/:episodeId/invite', requireStreamer, async (req: AuthenticatedRequ
     if (episode.streamerId !== req.user!.id) {
       throw new AppError('Only the episode owner can invite collaborators', 403, 'FORBIDDEN');
     }
+
+    // Validate total revenue share won't exceed limit
+    await validateTotalRevenueShare(episodeId, revenueShare);
 
     // Find user to invite
     const userToInvite = await prisma.user.findUnique({
@@ -116,7 +196,7 @@ router.post('/:episodeId/invite', requireStreamer, async (req: AuthenticatedRequ
             status: 'pending',
             role,
             permissions: permissions || ROLE_PERMISSIONS[role] || [],
-            revenueShare: Math.min(Math.max(revenueShare, 0), 50), // Max 50%
+            revenueShare, // Already validated
             invitedAt: new Date(),
             acceptedAt: null,
           },
@@ -328,7 +408,10 @@ router.patch('/:episodeId/:collaboratorId', requireStreamer, async (req: Authent
     }
 
     if (revenueShare !== undefined) {
-      updateData.revenueShare = Math.min(Math.max(revenueShare, 0), 50);
+      const validatedShare = validateRevenueShare(revenueShare);
+      // Check total revenue share, excluding this collaborator's current share
+      await validateTotalRevenueShare(episodeId, validatedShare, collaboratorId);
+      updateData.revenueShare = validatedShare;
     }
 
     const updated = await prisma.episodeCollaborator.update({
