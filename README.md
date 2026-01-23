@@ -252,6 +252,56 @@ For the ecosystem:
 - Fruit evolution (repeat viewers get upgrades)
 - API for game engines / custom UIs
 
+## Development
+
+### Quick Start
+
+```bash
+# Clone and install
+git clone https://github.com/kase1111-hash/StreamTree.git
+cd StreamTree
+npm install
+
+# Start infrastructure
+docker-compose up -d
+
+# Configure environment
+cp apps/api/.env.example apps/api/.env
+cp apps/web/.env.example apps/web/.env
+
+# Setup database
+npm run db:generate && npm run db:push
+
+# Start development servers
+npm run dev
+```
+
+The API runs on `http://localhost:3001` and the web app on `http://localhost:3000`.
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed setup instructions.
+
+### Project Structure
+
+```
+StreamTree/
+├── apps/
+│   ├── api/          # Express backend
+│   └── web/          # Next.js frontend
+├── packages/
+│   ├── shared/       # Shared types and utilities
+│   ├── contracts/    # Solidity smart contracts
+│   └── e2e-tests/    # Integration tests
+└── docker-compose.yml
+```
+
+## Documentation
+
+- [CONTRIBUTING.md](./CONTRIBUTING.md) - Development setup and contribution guidelines
+- [SPEC.md](./SPEC.md) - Technical specification
+- [NFTree.md](./NFTree.md) - NFTree conceptual model
+- [CHANGELOG.md](./CHANGELOG.md) - Version history
+- [SECURITY.md](./SECURITY.md) - Security policy
+
 ## Part Of
 
 NFTree Pattern → StreamTree Implementation
