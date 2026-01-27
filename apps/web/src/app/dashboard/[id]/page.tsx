@@ -38,7 +38,7 @@ export default function DashboardPage() {
   const params = useParams();
   const router = useRouter();
   const episodeId = params.id as string;
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const { connected } = useWebSocket(token);
 
   const [episode, setEpisode] = useState<Episode | null>(null);

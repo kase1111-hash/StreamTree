@@ -17,8 +17,11 @@
     "db:studio": "turbo run db:studio --filter=@streamtree/api"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
     "turbo": "^2.0.0",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "typescript-eslint": "^8.54.0"
   },
   "engines": {
     "node": ">=18.0.0"

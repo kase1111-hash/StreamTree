@@ -8,7 +8,7 @@ interface EventDefinition {
   name: string;
   icon: string;
   description?: string | null;
-  firedAt?: Date | null;
+  firedAt?: Date | string | null;
   firedCount?: number;
 }
 

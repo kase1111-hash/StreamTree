@@ -133,7 +133,7 @@ class WebSocketClient {
 export const wsClient = new WebSocketClient();
 
 // React hook for WebSocket
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export function useWebSocket(token: string | null) {
   const [connected, setConnected] = useState(false);
