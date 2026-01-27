@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
@@ -38,7 +38,28 @@ interface EpisodeEarning {
   canWithdraw: boolean;
 }
 
+// Wrapper component to handle Suspense boundary for useSearchParams
 export default function PaymentSettingsPage() {
+  return (
+    <Suspense fallback={<PaymentSettingsLoading />}>
+      <PaymentSettingsContent />
+    </Suspense>
+  );
+}
+
+function PaymentSettingsLoading() {
+  return (
+    <div className="max-w-2xl mx-auto px-4 py-8">
+      <div className="animate-pulse">
+        <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/3 mb-8" />
+        <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded mb-4" />
+        <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded" />
+      </div>
+    </div>
+  );
+}
+
+function PaymentSettingsContent() {
   const searchParams = useSearchParams();
   const { user, token } = useAuth();
   const [settings, setSettings] = useState<PaymentSettings | null>(null);
@@ -88,7 +109,7 @@ export default function PaymentSettingsPage() {
 
     try {
       const { onboardingUrl } = await paymentsApi.connectStripe(
-        user?.email || `${user?.username}@streamtree.app`,
+        `${user?.username}@streamtree.app`,
         token
       );
       window.location.href = onboardingUrl;

@@ -212,7 +212,7 @@ export function CardRenderer({
 // Compact version for previews
 export function CardPreview({
   grid,
-  events,
+  events: _events,
 }: {
   grid: GridSquare[][];
   events: EventInfo[];

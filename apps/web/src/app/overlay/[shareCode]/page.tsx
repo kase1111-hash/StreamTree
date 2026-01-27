@@ -58,7 +58,7 @@ export default function OBSOverlayPage() {
         if (lbData.success) {
           setLeaderboard(lbData.data.slice(0, maxLeaderboard));
         }
-      } catch (err) {
+      } catch {
         setError('Failed to load episode');
       }
     };
@@ -107,7 +107,7 @@ export default function OBSOverlayPage() {
 
   const handleWebSocketMessage = useCallback((data: any) => {
     switch (data.type) {
-      case 'event:fired':
+      case 'event:fired': {
         // Add to recent events
         const newEvent: EventNotification = {
           id: crypto.randomUUID(),
@@ -123,6 +123,7 @@ export default function OBSOverlayPage() {
           setRecentEvents((prev) => prev.filter((e) => e.id !== newEvent.id));
         }, 5000);
         break;
+      }
 
       case 'stats:update':
         // Update leaderboard

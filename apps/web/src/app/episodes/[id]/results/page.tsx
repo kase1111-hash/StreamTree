@@ -1,12 +1,11 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { episodesApi } from '@/lib/api';
 import { Leaderboard } from '@/components/Leaderboard';
-import { clsx } from 'clsx';
 
 interface EpisodeResults {
   id: string;
@@ -29,7 +28,6 @@ interface EpisodeResults {
 
 export default function EpisodeResultsPage() {
   const params = useParams();
-  const router = useRouter();
   const episodeId = params.id as string;
   const { user, token } = useAuth();
 

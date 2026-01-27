@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
@@ -23,7 +23,27 @@ interface Template {
   gridSize: number;
 }
 
+// Wrapper component to handle Suspense boundary for useSearchParams
 export default function CreateEpisodePage() {
+  return (
+    <Suspense fallback={<CreatePageLoading />}>
+      <CreateEpisodeContent />
+    </Suspense>
+  );
+}
+
+function CreatePageLoading() {
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-8">
+      <div className="animate-pulse">
+        <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/3 mx-auto mb-8" />
+        <div className="h-64 bg-gray-200 dark:bg-gray-700 rounded" />
+      </div>
+    </div>
+  );
+}
+
+function CreateEpisodeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const templateId = searchParams.get('template');

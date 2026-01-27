@@ -31,7 +31,7 @@ type SortOption = 'newest' | 'oldest' | 'score' | 'patterns';
 type FilterOption = 'all' | 'bingo' | 'blackout' | 'nft';
 
 export default function GalleryPage() {
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const [cards, setCards] = useState<GalleryCard[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
