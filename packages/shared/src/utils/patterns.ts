@@ -142,8 +142,9 @@ export function isRowComplete(grid: GridSquare[][], rowIndex: number): boolean {
  * Checks if a specific column is complete
  */
 export function isColumnComplete(grid: GridSquare[][], colIndex: number): boolean {
-  if (colIndex < 0 || grid.length === 0 || colIndex >= grid[0].length) return false;
-  return grid.every((row) => row[colIndex].marked);
+  // SECURITY: Check grid.length > 0 BEFORE accessing grid[0] to prevent undefined access
+  if (grid.length === 0 || colIndex < 0 || colIndex >= (grid[0]?.length ?? 0)) return false;
+  return grid.every((row) => row[colIndex]?.marked ?? false);
 }
 
 /**

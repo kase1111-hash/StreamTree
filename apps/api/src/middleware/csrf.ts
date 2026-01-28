@@ -104,26 +104,25 @@ export function csrfProtection(req: Request, res: Response, next: NextFunction):
   }
 
   // If none of the above, reject the request
-  // Note: In development, we may want to be more lenient
-  const isProduction = process.env.NODE_ENV === 'production';
+  // SECURITY: Enforce CSRF protection in all environments to catch issues early
+  // Use CSRF_BYPASS_DEV=true env var only for automated testing if needed
+  const allowDevBypass = process.env.CSRF_BYPASS_DEV === 'true' && process.env.NODE_ENV !== 'production';
 
-  if (isProduction) {
-    res.status(403).json({
-      success: false,
-      error: {
-        message: 'CSRF validation failed',
-        code: 'CSRF_ERROR',
-      },
-    });
-    return;
+  if (allowDevBypass) {
+    console.warn(
+      `CSRF Warning: Request to ${req.method} ${req.path} missing CSRF protection. ` +
+      'Bypassed due to CSRF_BYPASS_DEV=true. This would be blocked in production.'
+    );
+    return next();
   }
 
-  // In development, log warning but allow request
-  console.warn(
-    `CSRF Warning: Request to ${req.method} ${req.path} missing CSRF protection. ` +
-    'This would be blocked in production.'
-  );
-  next();
+  res.status(403).json({
+    success: false,
+    error: {
+      message: 'CSRF validation failed',
+      code: 'CSRF_ERROR',
+    },
+  });
 }
 
 /**

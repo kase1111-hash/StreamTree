@@ -2,6 +2,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { Server } from 'http';
 import jwt from 'jsonwebtoken';
 import { v4 as uuid } from 'uuid';
+import cookie from 'cookie';
 import { prisma } from '../db/client.js';
 import type { ClientToServerEvent, ServerToClientEvent, Pattern } from '@streamtree/shared';
 import { sanitizeError } from '../utils/sanitize.js';
@@ -51,20 +52,41 @@ export function setupWebSocket(server: Server): WebSocketServer {
 
     connections.set(client.id, client);
 
-    // Try to authenticate from query string
-    const url = new URL(req.url || '', `http://${req.headers.host}`);
-    const token = url.searchParams.get('token');
+    // SECURITY: Authenticate from HttpOnly cookie instead of URL query parameter
+    // This prevents token exposure in logs, browser history, and network analysis
+    const cookies = req.headers.cookie ? cookie.parse(req.headers.cookie) : {};
+    const accessToken = cookies.access_token;
 
-    if (token) {
+    if (accessToken) {
       try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+        const decoded = jwt.verify(accessToken, process.env.JWT_SECRET!) as {
           userId: string;
           username: string;
         };
         client.userId = decoded.userId;
         client.username = decoded.username;
       } catch {
-        // Continue as unauthenticated
+        // Continue as unauthenticated - token may be expired or invalid
+      }
+    }
+
+    // Also support Sec-WebSocket-Protocol header for token auth (optional fallback)
+    const protocol = req.headers['sec-websocket-protocol'];
+    if (!client.userId && protocol) {
+      const protocols = protocol.split(',').map((p) => p.trim());
+      const authProtocol = protocols.find((p) => p.startsWith('auth-'));
+      if (authProtocol) {
+        const token = authProtocol.substring(5); // Remove 'auth-' prefix
+        try {
+          const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+            userId: string;
+            username: string;
+          };
+          client.userId = decoded.userId;
+          client.username = decoded.username;
+        } catch {
+          // Continue as unauthenticated
+        }
       }
     }
 

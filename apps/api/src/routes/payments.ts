@@ -281,11 +281,12 @@ router.post('/withdraw/:episodeId', requireStreamer, async (req: AuthenticatedRe
     });
 
     try {
-      // Create Stripe transfer
+      // Create Stripe transfer with idempotency key based on withdrawal ID
       const transferId = await createTransfer(
         available,
         user.stripeAccountId,
-        episodeId
+        episodeId,
+        withdrawal.id
       );
 
       // Update withdrawal with transfer ID

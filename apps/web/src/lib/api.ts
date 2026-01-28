@@ -1,5 +1,39 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
+// SECURITY: File upload validation constants
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+/**
+ * Validates a file before upload
+ * @throws Error if file is invalid
+ */
+function validateFileUpload(file: File, maxSize: number = MAX_FILE_SIZE): void {
+  // Check file type
+  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+    throw new ApiError(
+      `Invalid file type: ${file.type}. Allowed types: ${ALLOWED_IMAGE_TYPES.join(', ')}`,
+      400,
+      'INVALID_FILE_TYPE'
+    );
+  }
+
+  // Check file size
+  if (file.size > maxSize) {
+    const maxMB = Math.round(maxSize / (1024 * 1024));
+    throw new ApiError(
+      `File too large: ${Math.round(file.size / (1024 * 1024))}MB. Maximum allowed: ${maxMB}MB`,
+      400,
+      'FILE_TOO_LARGE'
+    );
+  }
+
+  // Check if file is empty
+  if (file.size === 0) {
+    throw new ApiError('File is empty', 400, 'EMPTY_FILE');
+  }
+}
+
 interface ApiOptions {
   method?: string;
   body?: unknown;
@@ -202,6 +236,9 @@ export const paymentsApi = {
 // Upload
 export const uploadApi = {
   uploadArtwork: async (file: File, episodeId: string, token: string) => {
+    // SECURITY: Validate file before upload
+    validateFileUpload(file);
+
     const formData = new FormData();
     formData.append('file', file);
     formData.append('episodeId', episodeId);
@@ -230,6 +267,9 @@ export const uploadApi = {
   },
 
   uploadAvatar: async (file: File, token: string) => {
+    // SECURITY: Validate file before upload (5MB limit for avatars)
+    validateFileUpload(file, 5 * 1024 * 1024);
+
     const formData = new FormData();
     formData.append('file', file);
 

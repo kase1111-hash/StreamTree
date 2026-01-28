@@ -14,6 +14,58 @@ import {
 
 const router = Router();
 
+// SECURITY: Whitelist of allowed redirect URL paths to prevent open redirect attacks
+const ALLOWED_REDIRECT_PATHS = [
+  '/settings',
+  '/settings/payments',
+  '/dashboard',
+  '/create',
+];
+
+/**
+ * Validates and sanitizes a redirect URL to prevent open redirect attacks
+ * Only allows relative paths from the whitelist or the default
+ */
+function validateRedirectUrl(redirectUrl: string | undefined): string {
+  const defaultUrl = '/settings?twitch=connected';
+
+  if (!redirectUrl) {
+    return defaultUrl;
+  }
+
+  // Only allow relative paths (prevent open redirect to external sites)
+  try {
+    // Check if it's an absolute URL (has protocol)
+    if (redirectUrl.includes('://') || redirectUrl.startsWith('//')) {
+      console.warn(`OAuth redirect blocked: absolute URL not allowed: ${redirectUrl}`);
+      return defaultUrl;
+    }
+
+    // Must start with /
+    if (!redirectUrl.startsWith('/')) {
+      console.warn(`OAuth redirect blocked: must start with /: ${redirectUrl}`);
+      return defaultUrl;
+    }
+
+    // Extract the path without query params
+    const path = redirectUrl.split('?')[0];
+
+    // Check against whitelist
+    const isAllowed = ALLOWED_REDIRECT_PATHS.some(
+      (allowed) => path === allowed || path.startsWith(allowed + '/')
+    );
+
+    if (!isAllowed) {
+      console.warn(`OAuth redirect blocked: path not in whitelist: ${path}`);
+      return defaultUrl;
+    }
+
+    return redirectUrl;
+  } catch {
+    return defaultUrl;
+  }
+}
+
 // In-memory state storage (use Redis in production)
 const oauthStates = new Map<string, { userId: string; redirectUrl?: string; expiresAt: number }>();
 
@@ -121,9 +173,9 @@ router.get('/callback', async (req, res, next) => {
       },
     });
 
-    // Redirect back to the app
-    const redirectUrl = stateData.redirectUrl || '/settings?twitch=connected';
-    res.redirect(redirectUrl);
+    // SECURITY: Validate redirect URL to prevent open redirect attacks
+    const safeRedirectUrl = validateRedirectUrl(stateData.redirectUrl);
+    res.redirect(safeRedirectUrl);
   } catch (error) {
     next(error);
   }

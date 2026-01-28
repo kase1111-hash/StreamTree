@@ -17,6 +17,10 @@ export interface CreatePaymentIntentParams {
   metadata?: Record<string, string>;
 }
 
+// Payment amount limits (in cents)
+const MIN_PAYMENT_AMOUNT = 50; // $0.50 minimum (Stripe requirement)
+const MAX_PAYMENT_AMOUNT = 99999900; // $999,999.00 maximum
+
 export async function createPaymentIntent(
   params: CreatePaymentIntentParams
 ): Promise<{ clientSecret: string; paymentIntentId: string }> {
@@ -25,6 +29,11 @@ export async function createPaymentIntent(
   }
 
   const { amount, episodeId, userId, metadata = {} } = params;
+
+  // Validate payment amount
+  if (!Number.isInteger(amount) || amount < MIN_PAYMENT_AMOUNT || amount > MAX_PAYMENT_AMOUNT) {
+    throw new Error(`Payment amount must be between ${MIN_PAYMENT_AMOUNT} and ${MAX_PAYMENT_AMOUNT} cents`);
+  }
 
   const paymentIntent = await stripe.paymentIntents.create({
     amount,
@@ -114,20 +123,35 @@ export async function getAccountStatus(
 export async function createTransfer(
   amount: number,
   destinationAccountId: string,
-  episodeId: string
+  episodeId: string,
+  withdrawalId: string
 ): Promise<string> {
   if (!stripe) {
     throw new Error('Stripe is not configured');
   }
 
-  const transfer = await stripe.transfers.create({
-    amount,
-    currency: 'usd',
-    destination: destinationAccountId,
-    metadata: {
-      episodeId,
+  // Validate transfer amount
+  if (!Number.isInteger(amount) || amount <= 0) {
+    throw new Error('Transfer amount must be a positive integer');
+  }
+
+  // Use withdrawal ID as idempotency key to prevent duplicate transfers
+  const idempotencyKey = `transfer-${withdrawalId}`;
+
+  const transfer = await stripe.transfers.create(
+    {
+      amount,
+      currency: 'usd',
+      destination: destinationAccountId,
+      metadata: {
+        episodeId,
+        withdrawalId,
+      },
     },
-  });
+    {
+      idempotencyKey,
+    }
+  );
 
   return transfer.id;
 }
