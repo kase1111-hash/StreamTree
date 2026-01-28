@@ -29,13 +29,16 @@ model User {
   stripePayoutsEnabled  Boolean  @default(false) @map("stripe_payouts_enabled")
 
   // Relations
-  episodes       Episode[]
-  cards          Card[]
-  withdrawals    Withdrawal[]
-  templates      Template[]
-  collaborations EpisodeCollaborator[]
+  episodes        Episode[]
+  cards           Card[]
+  withdrawals     Withdrawal[]
+  templates       Template[]
+  collaborations  EpisodeCollaborator[]
+  refreshTokens   RefreshToken[]
+  pendingPayments PendingPayment[]
 
   @@unique([authProvider, authProviderId])
+  @@index([isStreamer])
   @@map("users")
 }
 
@@ -69,6 +72,7 @@ model Episode {
   twitchSubscriptions TwitchSubscription[]
   chatKeywords        ChatKeyword[]
   collaborators       EpisodeCollaborator[]
+  pendingPayments     PendingPayment[]
 
   @@index([streamerId])
   @@index([status])
@@ -116,9 +120,9 @@ model Card {
   fruitTokenId  String?   @map("fruit_token_id")
   cardNumber    Int       @map("card_number")
 
-  // Relations
-  episode Episode @relation(fields: [episodeId], references: [id])
-  holder  User    @relation(fields: [holderId], references: [id])
+  // Relations - Cascade delete when episode or user is deleted
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  holder  User    @relation(fields: [holderId], references: [id], onDelete: Cascade)
 
   @@unique([episodeId, holderId])
   @@index([episodeId])
@@ -137,9 +141,9 @@ model FiredEvent {
   cardsAffected     Int      @default(0) @map("cards_affected")
   triggerData       Json?    @map("trigger_data")
 
-  // Relations
-  episode         Episode         @relation(fields: [episodeId], references: [id])
-  eventDefinition EventDefinition @relation(fields: [eventDefinitionId], references: [id])
+  // Relations - Cascade delete when episode or event is deleted
+  episode         Episode         @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  eventDefinition EventDefinition @relation(fields: [eventDefinitionId], references: [id], onDelete: Cascade)
 
   @@index([episodeId])
   @@index([firedAt])
@@ -153,6 +157,9 @@ model RefreshToken {
   token     String   @unique
   expiresAt DateTime @map("expires_at")
   createdAt DateTime @default(now()) @map("created_at")
+
+  // Relation - Cascade delete when user is deleted
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([token])
@@ -173,13 +180,14 @@ model Withdrawal {
   completedAt      DateTime? @map("completed_at")
   failedReason     String?   @map("failed_reason")
 
-  // Relations
-  streamer User    @relation(fields: [streamerId], references: [id])
-  episode  Episode @relation(fields: [episodeId], references: [id])
+  // Relations - Cascade delete when user or episode is deleted
+  streamer User    @relation(fields: [streamerId], references: [id], onDelete: Cascade)
+  episode  Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
 
   @@index([streamerId])
   @@index([episodeId])
   @@index([status])
+  @@index([completedAt])
   @@map("withdrawals")
 }
 
@@ -193,6 +201,10 @@ model PendingPayment {
   status          String   @default("pending") // pending, completed, expired, failed
   createdAt       DateTime @default(now()) @map("created_at")
   expiresAt       DateTime @map("expires_at")
+
+  // Relations - Cascade delete when episode or user is deleted
+  episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([episodeId])
   @@index([userId])
@@ -273,8 +285,8 @@ model Template {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  // Relations
-  creator User @relation(fields: [creatorId], references: [id])
+  // Relations - Cascade delete when creator is deleted
+  creator User @relation(fields: [creatorId], references: [id], onDelete: Cascade)
 
   @@index([creatorId])
   @@index([category])
@@ -294,9 +306,9 @@ model EpisodeCollaborator {
   status       String   @default("pending") // pending, accepted, declined, removed
   revenueShare Int      @default(0) @map("revenue_share") // Percentage (0-100) of revenue to share
 
-  // Relations
+  // Relations - Cascade delete when episode or user is deleted
   episode Episode @relation(fields: [episodeId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id])
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([episodeId, userId])
   @@index([episodeId])

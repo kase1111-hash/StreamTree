@@ -116,6 +116,8 @@ contract StreamTree is ERC721, ERC721URIStorage, ERC721Enumerable, Ownable, Reen
 
     event MinterAuthorized(address indexed minter, bool authorized);
 
+    event PlatformAddressUpdated(address indexed oldAddress, address indexed newAddress);
+
     // ============ Modifiers ============
 
     modifier onlyAuthorizedMinter() {
@@ -394,7 +396,9 @@ contract StreamTree is ERC721, ERC721URIStorage, ERC721Enumerable, Ownable, Reen
      */
     function setPlatformAddress(address _platformAddress) external onlyOwner {
         require(_platformAddress != address(0), "Invalid address");
+        address oldAddress = platformAddress;
         platformAddress = _platformAddress;
+        emit PlatformAddressUpdated(oldAddress, _platformAddress);
     }
 
     // ============ Overrides ============

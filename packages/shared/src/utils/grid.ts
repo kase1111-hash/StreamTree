@@ -92,11 +92,13 @@ export function getSquareAtPosition(
   grid: GridSquare[][],
   position: Position
 ): GridSquare | null {
+  // SECURITY: Add bounds check for empty grids to prevent undefined access
   if (
+    grid.length === 0 ||
     position.row < 0 ||
     position.row >= grid.length ||
     position.col < 0 ||
-    position.col >= grid[0].length
+    position.col >= (grid[0]?.length ?? 0)
   ) {
     return null;
   }
@@ -115,11 +117,13 @@ export function markSquare(
     row.map((square) => ({ ...square }))
   );
 
+  // SECURITY: Add bounds check for empty grids to prevent undefined access
   if (
+    result.length > 0 &&
     position.row >= 0 &&
     position.row < result.length &&
     position.col >= 0 &&
-    position.col < result[0].length
+    position.col < (result[0]?.length ?? 0)
   ) {
     result[position.row][position.col].marked = true;
     result[position.row][position.col].markedAt = markedAt;

@@ -27,10 +27,11 @@ class WebSocketClient {
     this.isConnecting = true;
     this.token = token || this.token;
 
-    const wsUrl = this.token ? `${this.url}?token=${this.token}` : this.url;
-
+    // SECURITY: Don't pass token in URL query parameter as it gets logged
+    // Use Sec-WebSocket-Protocol header instead, which is not logged
     try {
-      this.ws = new WebSocket(wsUrl);
+      const protocols = this.token ? ['streamtree', `auth-${this.token}`] : ['streamtree'];
+      this.ws = new WebSocket(this.url, protocols);
 
       this.ws.onopen = () => {
         this.isConnecting = false;
