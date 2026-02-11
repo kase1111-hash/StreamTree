@@ -355,9 +355,52 @@ contract StreamTree is ERC721, ERC721URIStorage, ERC721Enumerable, Ownable, Reen
 
     /**
      * @dev Get all branches for a root
+     * @notice For roots with many branches, prefer getRootBranchesPaginated to avoid gas limits
      */
     function getRootBranches(uint256 rootId) external view returns (uint256[] memory) {
         return rootBranches[rootId];
+    }
+
+    /**
+     * @dev Get branches for a root with pagination
+     * @param rootId The root token ID
+     * @param offset Starting index
+     * @param limit Maximum number of branch IDs to return
+     * @return branchIds The paginated branch IDs
+     * @return total The total number of branches for this root
+     */
+    function getRootBranchesPaginated(
+        uint256 rootId,
+        uint256 offset,
+        uint256 limit
+    ) external view returns (uint256[] memory branchIds, uint256 total) {
+        uint256[] storage allBranches = rootBranches[rootId];
+        total = allBranches.length;
+
+        if (offset >= total || limit == 0) {
+            return (new uint256[](0), total);
+        }
+
+        uint256 end = offset + limit;
+        if (end > total) {
+            end = total;
+        }
+
+        uint256 resultLength = end - offset;
+        branchIds = new uint256[](resultLength);
+
+        for (uint256 i = 0; i < resultLength; i++) {
+            branchIds[i] = allBranches[offset + i];
+        }
+
+        return (branchIds, total);
+    }
+
+    /**
+     * @dev Get the number of branches for a root
+     */
+    function getRootBranchCount(uint256 rootId) external view returns (uint256) {
+        return rootBranches[rootId].length;
     }
 
     /**
