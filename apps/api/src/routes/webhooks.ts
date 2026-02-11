@@ -3,7 +3,10 @@ import crypto from 'crypto';
 import Stripe from 'stripe';
 import { prisma } from '../db/client.js';
 import { stripe, createRefund } from '../services/stripe.service.js';
-import { generateCardGrid } from '@streamtree/shared';
+import { generateCardGrid, detectPatterns as _detectPatterns } from '@streamtree/shared';
+
+// Cast to any[] for Prisma JSON compatibility
+const detectPatterns = (grid: any[][]): any[] => _detectPatterns(grid) as any[];
 import { broadcastToEpisode, broadcastStats, sendToUser } from '../websocket/server.js';
 import {
   verifyWebhookSignature,
@@ -412,57 +415,6 @@ async function fireEventFromTwitch(
   } catch (error) {
     console.error('Error firing Twitch event:', sanitizeError(error));
   }
-}
-
-// Simple pattern detection (duplicated from shared for now)
-function detectPatterns(grid: any[][]): any[] {
-  const patterns: any[] = [];
-  const size = grid.length;
-
-  // Check rows
-  for (let row = 0; row < size; row++) {
-    if (grid[row].every((sq: any) => sq.marked)) {
-      patterns.push({ type: 'row', index: row });
-    }
-  }
-
-  // Check columns
-  for (let col = 0; col < size; col++) {
-    if (grid.every((row: any[]) => row[col].marked)) {
-      patterns.push({ type: 'column', index: col });
-    }
-  }
-
-  // Check main diagonal
-  let mainDiagonal = true;
-  for (let i = 0; i < size; i++) {
-    if (!grid[i][i].marked) {
-      mainDiagonal = false;
-      break;
-    }
-  }
-  if (mainDiagonal) {
-    patterns.push({ type: 'diagonal', direction: 'main' });
-  }
-
-  // Check anti-diagonal
-  let antiDiagonal = true;
-  for (let i = 0; i < size; i++) {
-    if (!grid[i][size - 1 - i].marked) {
-      antiDiagonal = false;
-      break;
-    }
-  }
-  if (antiDiagonal) {
-    patterns.push({ type: 'diagonal', direction: 'anti' });
-  }
-
-  // Check blackout
-  if (grid.every((row: any[]) => row.every((sq: any) => sq.marked))) {
-    patterns.push({ type: 'blackout' });
-  }
-
-  return patterns;
 }
 
 // Custom webhook handler for external integrations

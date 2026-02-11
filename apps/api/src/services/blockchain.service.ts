@@ -1,5 +1,73 @@
-import { ethers, Contract, Wallet, JsonRpcProvider } from 'ethers';
+import { ethers, Contract, Wallet, JsonRpcProvider, TransactionResponse, TransactionReceipt } from 'ethers';
 import { sanitizeError } from '../utils/sanitize.js';
+
+// Transaction configuration
+const TX_WAIT_TIMEOUT_MS = 60_000; // 60 seconds max wait for confirmation
+const MAX_RETRIES = 3;
+const INITIAL_RETRY_DELAY_MS = 2_000; // 2 seconds, doubles each retry
+
+/**
+ * Wait for a transaction with a timeout to prevent indefinite hangs
+ */
+async function waitForTransaction(
+  tx: TransactionResponse,
+  timeoutMs: number = TX_WAIT_TIMEOUT_MS
+): Promise<TransactionReceipt> {
+  const receipt = await Promise.race([
+    tx.wait(),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`Transaction confirmation timed out after ${timeoutMs}ms (tx: ${tx.hash})`)), timeoutMs)
+    ),
+  ]);
+
+  if (!receipt) {
+    throw new Error(`Transaction returned null receipt (tx: ${tx.hash})`);
+  }
+
+  return receipt;
+}
+
+/**
+ * Execute a blockchain operation with retry logic and exponential backoff.
+ * Only retries on transient errors (network issues, nonce conflicts).
+ * Does NOT retry on revert errors (contract logic failures).
+ */
+async function withRetry<T>(
+  operation: () => Promise<T>,
+  operationName: string,
+  maxRetries: number = MAX_RETRIES
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error: unknown) {
+      lastError = error;
+
+      // Don't retry on contract reverts — these are deterministic failures
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isRevert = errorMessage.includes('revert') ||
+        errorMessage.includes('CALL_EXCEPTION') ||
+        errorMessage.includes('execution reverted');
+
+      if (isRevert) {
+        throw error;
+      }
+
+      if (attempt < maxRetries) {
+        const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempt);
+        console.warn(
+          `${operationName} failed (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delay}ms:`,
+          sanitizeError(error)
+        );
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  throw lastError;
+}
 
 // SECURITY: Validate and protect private key
 // Private keys are extremely sensitive - never log them
@@ -42,6 +110,8 @@ const STREAMTREE_ABI = [
   'function tokenType(uint256 tokenId) external view returns (uint8)',
   'function ownerOf(uint256 tokenId) external view returns (address)',
   'function tokenURI(uint256 tokenId) external view returns (string)',
+  'function getRootBranchesPaginated(uint256 rootId, uint256 offset, uint256 limit) external view returns (uint256[] branchIds, uint256 total)',
+  'function getRootBranchCount(uint256 rootId) external view returns (uint256)',
 
   // Events
   'event RootCreated(uint256 indexed rootId, address indexed streamer, string episodeId, uint256 maxSupply)',
@@ -123,10 +193,10 @@ export async function createRootToken(
     return null;
   }
 
-  try {
+  return withRetry(async () => {
     console.log('Creating root token for episode:', episodeId);
 
-    const tx = await contract.createRoot(
+    const tx = await contract!.createRoot(
       streamerAddress,
       episodeId,
       maxSupply,
@@ -135,7 +205,7 @@ export async function createRootToken(
 
     console.log('Transaction sent:', tx.hash);
 
-    const receipt = await tx.wait();
+    const receipt = await waitForTransaction(tx);
     console.log('Transaction confirmed in block:', receipt.blockNumber);
 
     // Parse the RootCreated event to get the token ID
@@ -149,7 +219,7 @@ export async function createRootToken(
     });
 
     if (event) {
-      const parsed = contract.interface.parseLog(event);
+      const parsed = contract!.interface.parseLog(event);
       const tokenId = parsed!.args[0].toString();
       console.log('Root token created:', tokenId);
 
@@ -160,10 +230,7 @@ export async function createRootToken(
     }
 
     return null;
-  } catch (error) {
-    console.error('Failed to create root token:', sanitizeError(error));
-    throw error;
-  }
+  }, 'createRootToken');
 }
 
 /**
@@ -175,20 +242,17 @@ export async function endRootToken(rootTokenId: string): Promise<string | null> 
     return null;
   }
 
-  try {
+  return withRetry(async () => {
     console.log('Ending root token:', rootTokenId);
 
-    const tx = await contract.endRoot(rootTokenId);
+    const tx = await contract!.endRoot(rootTokenId);
     console.log('Transaction sent:', tx.hash);
 
-    await tx.wait();
+    await waitForTransaction(tx);
     console.log('Root ended successfully');
 
     return tx.hash;
-  } catch (error) {
-    console.error('Failed to end root token:', sanitizeError(error));
-    throw error;
-  }
+  }, 'endRootToken');
 }
 
 /**
@@ -205,10 +269,10 @@ export async function mintBranchToken(
     return null;
   }
 
-  try {
+  return withRetry(async () => {
     console.log('Minting branch token for card:', cardId);
 
-    const tx = await contract.mintBranch(
+    const tx = await contract!.mintBranch(
       rootTokenId,
       holderAddress,
       cardId,
@@ -217,7 +281,7 @@ export async function mintBranchToken(
 
     console.log('Transaction sent:', tx.hash);
 
-    const receipt = await tx.wait();
+    const receipt = await waitForTransaction(tx);
     console.log('Transaction confirmed in block:', receipt.blockNumber);
 
     // Parse the BranchMinted event to get the token ID
@@ -231,7 +295,7 @@ export async function mintBranchToken(
     });
 
     if (event) {
-      const parsed = contract.interface.parseLog(event);
+      const parsed = contract!.interface.parseLog(event);
       const tokenId = parsed!.args[0].toString();
       console.log('Branch token minted:', tokenId);
 
@@ -242,10 +306,7 @@ export async function mintBranchToken(
     }
 
     return null;
-  } catch (error) {
-    console.error('Failed to mint branch token:', sanitizeError(error));
-    throw error;
-  }
+  }, 'mintBranchToken');
 }
 
 /**
@@ -262,10 +323,10 @@ export async function mintFruitToken(
     return null;
   }
 
-  try {
+  return withRetry(async () => {
     console.log('Minting fruit token for branch:', branchTokenId);
 
-    const tx = await contract.mintFruit(
+    const tx = await contract!.mintFruit(
       branchTokenId,
       finalScore,
       patterns,
@@ -274,7 +335,7 @@ export async function mintFruitToken(
 
     console.log('Transaction sent:', tx.hash);
 
-    const receipt = await tx.wait();
+    const receipt = await waitForTransaction(tx);
     console.log('Transaction confirmed in block:', receipt.blockNumber);
 
     // Parse the BranchFruited event to get the token ID
@@ -288,7 +349,7 @@ export async function mintFruitToken(
     });
 
     if (event) {
-      const parsed = contract.interface.parseLog(event);
+      const parsed = contract!.interface.parseLog(event);
       const tokenId = parsed!.args[1].toString();
       console.log('Fruit token minted:', tokenId);
 
@@ -299,10 +360,7 @@ export async function mintFruitToken(
     }
 
     return null;
-  } catch (error) {
-    console.error('Failed to mint fruit token:', sanitizeError(error));
-    throw error;
-  }
+  }, 'mintFruitToken');
 }
 
 /**
@@ -319,10 +377,10 @@ export async function batchMintFruitTokens(
     return null;
   }
 
-  try {
+  return withRetry(async () => {
     console.log('Batch minting fruit tokens for', branchTokenIds.length, 'branches');
 
-    const tx = await contract.batchMintFruit(
+    const tx = await contract!.batchMintFruit(
       branchTokenIds,
       finalScores,
       patterns,
@@ -331,7 +389,8 @@ export async function batchMintFruitTokens(
 
     console.log('Transaction sent:', tx.hash);
 
-    const receipt = await tx.wait();
+    // Batch mints may take longer — use extended timeout
+    const receipt = await waitForTransaction(tx, TX_WAIT_TIMEOUT_MS * 2);
     console.log('Transaction confirmed in block:', receipt.blockNumber);
 
     // Parse all BranchFruited events
@@ -339,7 +398,7 @@ export async function batchMintFruitTokens(
 
     for (const log of receipt.logs) {
       try {
-        const parsed = contract.interface.parseLog(log);
+        const parsed = contract!.interface.parseLog(log);
         if (parsed?.name === 'BranchFruited') {
           results.push({
             tokenId: parsed.args[1].toString(),
@@ -353,10 +412,7 @@ export async function batchMintFruitTokens(
 
     console.log('Batch minted', results.length, 'fruit tokens');
     return results;
-  } catch (error) {
-    console.error('Failed to batch mint fruit tokens:', sanitizeError(error));
-    throw error;
-  }
+  }, 'batchMintFruitTokens');
 }
 
 /**
@@ -385,6 +441,43 @@ export async function getBranchByCard(cardId: string): Promise<string | null> {
     return branchId.toString() === '0' ? null : branchId.toString();
   } catch (error) {
     console.error('Failed to get branch by card:', sanitizeError(error));
+    return null;
+  }
+}
+
+/**
+ * Get paginated branches for a root token
+ */
+export async function getRootBranchesPaginated(
+  rootTokenId: string,
+  offset: number,
+  limit: number
+): Promise<{ branchIds: string[]; total: number } | null> {
+  if (!contract) return null;
+
+  try {
+    const [branchIds, total] = await contract.getRootBranchesPaginated(rootTokenId, offset, limit);
+    return {
+      branchIds: branchIds.map((id: bigint) => id.toString()),
+      total: Number(total),
+    };
+  } catch (error) {
+    console.error('Failed to get paginated branches:', sanitizeError(error));
+    return null;
+  }
+}
+
+/**
+ * Get the number of branches for a root
+ */
+export async function getRootBranchCount(rootTokenId: string): Promise<number | null> {
+  if (!contract) return null;
+
+  try {
+    const count = await contract.getRootBranchCount(rootTokenId);
+    return Number(count);
+  } catch (error) {
+    console.error('Failed to get branch count:', sanitizeError(error));
     return null;
   }
 }

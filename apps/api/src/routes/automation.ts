@@ -5,6 +5,13 @@ import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
 import { broadcastToEpisode, sendToUser } from '../websocket/server.js';
 import { sanitizeError } from '../utils/sanitize.js';
+import { detectPatterns as _detectPatterns } from '@streamtree/shared';
+
+// Cast to any[] for Prisma JSON compatibility
+const detectPatterns = (grid: any[][]): any[] => _detectPatterns(grid) as any[];
+
+// Max regex pattern length to prevent ReDoS
+const MAX_REGEX_LENGTH = 200;
 
 const router = Router();
 
@@ -207,6 +214,33 @@ router.post('/keywords/:episodeId', requireStreamer, async (req: AuthenticatedRe
       throw new AppError('eventId and keyword are required', 400, 'VALIDATION_ERROR');
     }
 
+    // Validate matchType
+    const validMatchTypes = ['exact', 'contains', 'startswith', 'regex'];
+    const effectiveMatchType = matchType || 'contains';
+    if (!validMatchTypes.includes(effectiveMatchType)) {
+      throw new AppError(
+        `Invalid matchType. Must be one of: ${validMatchTypes.join(', ')}`,
+        400,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    // Validate regex patterns to prevent ReDoS
+    if (effectiveMatchType === 'regex') {
+      if (keyword.length > MAX_REGEX_LENGTH) {
+        throw new AppError(
+          `Regex pattern too long (max ${MAX_REGEX_LENGTH} characters)`,
+          400,
+          'VALIDATION_ERROR'
+        );
+      }
+      try {
+        new RegExp(keyword);
+      } catch {
+        throw new AppError('Invalid regex pattern', 400, 'VALIDATION_ERROR');
+      }
+    }
+
     const episode = await prisma.episode.findUnique({
       where: { id: req.params.episodeId },
     });
@@ -233,7 +267,7 @@ router.post('/keywords/:episodeId', requireStreamer, async (req: AuthenticatedRe
         episodeId: episode.id,
         eventId,
         keyword,
-        matchType: matchType || 'contains',
+        matchType: effectiveMatchType,
         caseSensitive: caseSensitive ?? false,
         cooldownSeconds: cooldownSeconds || 0,
       },
@@ -258,6 +292,18 @@ router.patch('/keywords/:keywordId', requireStreamer, async (req: AuthenticatedR
   try {
     const { keyword, matchType, caseSensitive, cooldownSeconds, isActive } = req.body;
 
+    // Validate matchType if provided
+    if (matchType !== undefined) {
+      const validMatchTypes = ['exact', 'contains', 'startswith', 'regex'];
+      if (!validMatchTypes.includes(matchType)) {
+        throw new AppError(
+          `Invalid matchType. Must be one of: ${validMatchTypes.join(', ')}`,
+          400,
+          'VALIDATION_ERROR'
+        );
+      }
+    }
+
     const chatKeyword = await prisma.chatKeyword.findUnique({
       where: { id: req.params.keywordId },
       include: { episode: true },
@@ -269,6 +315,24 @@ router.patch('/keywords/:keywordId', requireStreamer, async (req: AuthenticatedR
 
     if (chatKeyword.episode.streamerId !== req.user!.id) {
       throw new AppError('Not authorized', 403, 'FORBIDDEN');
+    }
+
+    // Validate regex if the effective match type will be regex
+    const effectiveMatchType = matchType ?? chatKeyword.matchType;
+    const effectiveKeyword = keyword ?? chatKeyword.keyword;
+    if (effectiveMatchType === 'regex') {
+      if (effectiveKeyword.length > MAX_REGEX_LENGTH) {
+        throw new AppError(
+          `Regex pattern too long (max ${MAX_REGEX_LENGTH} characters)`,
+          400,
+          'VALIDATION_ERROR'
+        );
+      }
+      try {
+        new RegExp(effectiveKeyword);
+      } catch {
+        throw new AppError('Invalid regex pattern', 400, 'VALIDATION_ERROR');
+      }
     }
 
     const updated = await prisma.chatKeyword.update({
@@ -550,52 +614,6 @@ async function fireEventFromChat(
   } catch (error) {
     console.error('Error firing chat event:', sanitizeError(error));
   }
-}
-
-// Simple pattern detection (duplicated for now)
-function detectPatterns(grid: any[][]): any[] {
-  const patterns: any[] = [];
-  const size = grid.length;
-
-  for (let row = 0; row < size; row++) {
-    if (grid[row].every((sq: any) => sq.marked)) {
-      patterns.push({ type: 'row', index: row });
-    }
-  }
-
-  for (let col = 0; col < size; col++) {
-    if (grid.every((row: any[]) => row[col].marked)) {
-      patterns.push({ type: 'column', index: col });
-    }
-  }
-
-  let mainDiagonal = true;
-  for (let i = 0; i < size; i++) {
-    if (!grid[i][i].marked) {
-      mainDiagonal = false;
-      break;
-    }
-  }
-  if (mainDiagonal) {
-    patterns.push({ type: 'diagonal', direction: 'main' });
-  }
-
-  let antiDiagonal = true;
-  for (let i = 0; i < size; i++) {
-    if (!grid[i][size - 1 - i].marked) {
-      antiDiagonal = false;
-      break;
-    }
-  }
-  if (antiDiagonal) {
-    patterns.push({ type: 'diagonal', direction: 'anti' });
-  }
-
-  if (grid.every((row: any[]) => row.every((sq: any) => sq.marked))) {
-    patterns.push({ type: 'blackout' });
-  }
-
-  return patterns;
 }
 
 export { router as automationRouter };

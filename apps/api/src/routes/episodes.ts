@@ -2,7 +2,10 @@ import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
-import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice } from '@streamtree/shared';
+import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice, detectPatterns as _detectPatterns } from '@streamtree/shared';
+
+// Cast to any[] for Prisma JSON compatibility
+const detectPatterns = (grid: any[][]): any[] => _detectPatterns(grid) as any[];
 import { broadcastToEpisode, broadcastStats } from '../websocket/server.js';
 import {
   isBlockchainConfigured,
@@ -600,6 +603,19 @@ router.post('/:id/events', requireStreamer, async (req: AuthenticatedRequest, re
       throw new AppError('Event name is required', 400, 'VALIDATION_ERROR');
     }
 
+    // Validate triggerType
+    const validTriggerTypes = ['manual', 'twitch', 'chat', 'webhook'];
+    if (!validTriggerTypes.includes(triggerType)) {
+      throw new AppError(
+        `Invalid triggerType. Must be one of: ${validTriggerTypes.join(', ')}`,
+        400,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    // Validate triggerConfig matches the triggerType schema
+    const validatedConfig = validateTriggerConfig(triggerType, triggerConfig);
+
     // Get current max order
     const maxOrder = await prisma.eventDefinition.aggregate({
       where: { episodeId: episode.id },
@@ -613,7 +629,7 @@ router.post('/:id/events', requireStreamer, async (req: AuthenticatedRequest, re
         icon,
         description,
         triggerType,
-        triggerConfig,
+        triggerConfig: (validatedConfig as any) ?? undefined,
         sortOrder: (maxOrder._max.sortOrder ?? -1) + 1,
       },
     });
@@ -664,10 +680,20 @@ router.patch('/:id/events/:eventId', requireStreamer, async (req: AuthenticatedR
       updateData.description = description;
     }
     if (triggerType !== undefined) {
+      const validTriggerTypes = ['manual', 'twitch', 'chat', 'webhook'];
+      if (!validTriggerTypes.includes(triggerType)) {
+        throw new AppError(
+          `Invalid triggerType. Must be one of: ${validTriggerTypes.join(', ')}`,
+          400,
+          'VALIDATION_ERROR'
+        );
+      }
       updateData.triggerType = triggerType;
     }
     if (triggerConfig !== undefined) {
-      updateData.triggerConfig = triggerConfig;
+      // Use the effective triggerType (new value or existing)
+      const effectiveType = (triggerType as string) || event.triggerType;
+      updateData.triggerConfig = validateTriggerConfig(effectiveType, triggerConfig) ?? undefined;
     }
     if (order !== undefined) {
       updateData.sortOrder = order;
@@ -803,7 +829,7 @@ router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, 
         const markedCount = grid.flat().filter((sq) => sq.marked).length;
 
         // Detect patterns
-        const patterns = detectCardPatterns(grid);
+        const patterns = detectPatterns(grid);
 
         await prisma.card.update({
           where: { id: card.id },
@@ -869,41 +895,72 @@ router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, 
   }
 });
 
-// Helper function to detect patterns
-function detectCardPatterns(grid: any[][]): any[] {
-  const patterns: any[] = [];
-  const size = grid.length;
+// Valid Twitch event types for triggerConfig validation
+const VALID_TWITCH_EVENTS = [
+  'follow', 'subscription', 'gift_sub', 'cheer', 'raid', 'redemption',
+];
 
-  // Check rows
-  for (let row = 0; row < size; row++) {
-    if (grid[row].every((sq: any) => sq.marked)) {
-      patterns.push({ type: 'row', index: row });
+/**
+ * Validate triggerConfig against its triggerType schema.
+ * Returns the validated (and sanitized) config, or null for types that don't use config.
+ */
+function validateTriggerConfig(triggerType: string, triggerConfig: unknown): Record<string, unknown> | null {
+  if (triggerType === 'manual') {
+    // Manual events don't use triggerConfig
+    return null;
+  }
+
+  if (triggerType === 'twitch') {
+    if (!triggerConfig || typeof triggerConfig !== 'object') {
+      throw new AppError(
+        'triggerConfig is required for twitch events and must include twitchEvent',
+        400,
+        'VALIDATION_ERROR'
+      );
     }
-  }
 
-  // Check columns
-  for (let col = 0; col < size; col++) {
-    if (grid.every((row) => row[col].marked)) {
-      patterns.push({ type: 'column', index: col });
+    const config = triggerConfig as Record<string, unknown>;
+
+    if (!config.twitchEvent || typeof config.twitchEvent !== 'string') {
+      throw new AppError(
+        'triggerConfig.twitchEvent is required for twitch events',
+        400,
+        'VALIDATION_ERROR'
+      );
     }
+
+    if (!VALID_TWITCH_EVENTS.includes(config.twitchEvent)) {
+      throw new AppError(
+        `Invalid twitchEvent. Must be one of: ${VALID_TWITCH_EVENTS.join(', ')}`,
+        400,
+        'VALIDATION_ERROR'
+      );
+    }
+
+    if (config.threshold !== undefined) {
+      if (typeof config.threshold !== 'number' || config.threshold < 0 || !Number.isFinite(config.threshold)) {
+        throw new AppError(
+          'triggerConfig.threshold must be a non-negative number',
+          400,
+          'VALIDATION_ERROR'
+        );
+      }
+    }
+
+    // Return only validated fields
+    return {
+      twitchEvent: config.twitchEvent,
+      ...(config.threshold !== undefined ? { threshold: config.threshold } : {}),
+    };
   }
 
-  // Check diagonals
-  let mainDiag = true;
-  let antiDiag = true;
-  for (let i = 0; i < size; i++) {
-    if (!grid[i][i].marked) mainDiag = false;
-    if (!grid[i][size - 1 - i].marked) antiDiag = false;
-  }
-  if (mainDiag) patterns.push({ type: 'diagonal', direction: 'main' });
-  if (antiDiag) patterns.push({ type: 'diagonal', direction: 'anti' });
-
-  // Check blackout
-  if (grid.every((row) => row.every((sq: any) => sq.marked))) {
-    patterns.push({ type: 'blackout' });
+  if (triggerType === 'chat' || triggerType === 'webhook') {
+    // Chat and webhook events use triggerConfig optionally for metadata
+    // No strict schema required — config is informational
+    return (triggerConfig as Record<string, unknown>) ?? null;
   }
 
-  return patterns;
+  return null;
 }
 
 export { router as episodesRouter };

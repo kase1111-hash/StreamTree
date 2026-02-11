@@ -322,6 +322,131 @@ describe("StreamTree", function () {
     });
   });
 
+  describe("Paginated Branch Queries", function () {
+    beforeEach(async function () {
+      await streamTree.createRoot(streamer.address, "episode-123", 0, "ipfs://episode");
+      // Mint 5 branches
+      for (let i = 0; i < 5; i++) {
+        await streamTree.mintBranch(1, viewer1.address, `card-${i}`, `ipfs://card-${i}`);
+      }
+    });
+
+    it("Should return paginated branches", async function () {
+      const [branchIds, total] = await streamTree.getRootBranchesPaginated(1, 0, 3);
+      expect(total).to.equal(5);
+      expect(branchIds.length).to.equal(3);
+      expect(branchIds[0]).to.equal(1_000_000);
+      expect(branchIds[1]).to.equal(1_000_001);
+      expect(branchIds[2]).to.equal(1_000_002);
+    });
+
+    it("Should return second page of branches", async function () {
+      const [branchIds, total] = await streamTree.getRootBranchesPaginated(1, 3, 3);
+      expect(total).to.equal(5);
+      expect(branchIds.length).to.equal(2); // Only 2 remaining
+      expect(branchIds[0]).to.equal(1_000_003);
+      expect(branchIds[1]).to.equal(1_000_004);
+    });
+
+    it("Should return empty array when offset exceeds total", async function () {
+      const [branchIds, total] = await streamTree.getRootBranchesPaginated(1, 10, 5);
+      expect(total).to.equal(5);
+      expect(branchIds.length).to.equal(0);
+    });
+
+    it("Should return empty array for zero limit", async function () {
+      const [branchIds, total] = await streamTree.getRootBranchesPaginated(1, 0, 0);
+      expect(total).to.equal(5);
+      expect(branchIds.length).to.equal(0);
+    });
+
+    it("Should return correct branch count", async function () {
+      const count = await streamTree.getRootBranchCount(1);
+      expect(count).to.equal(5);
+    });
+
+    it("Should return zero count for non-existent root", async function () {
+      const count = await streamTree.getRootBranchCount(999);
+      expect(count).to.equal(0);
+    });
+  });
+
+  describe("Edge Cases", function () {
+    it("Should reject empty episode ID", async function () {
+      await expect(
+        streamTree.createRoot(streamer.address, "", 10, "ipfs://metadata")
+      ).to.be.revertedWith("Empty episode ID");
+    });
+
+    it("Should reject zero address for streamer", async function () {
+      await expect(
+        streamTree.createRoot(ethers.ZeroAddress, "episode-1", 10, "ipfs://metadata")
+      ).to.be.revertedWith("Invalid streamer address");
+    });
+
+    it("Should reject empty card ID", async function () {
+      await streamTree.createRoot(streamer.address, "episode-1", 10, "ipfs://episode");
+      await expect(
+        streamTree.mintBranch(1, viewer1.address, "", "ipfs://card")
+      ).to.be.revertedWith("Empty card ID");
+    });
+
+    it("Should reject zero address for holder", async function () {
+      await streamTree.createRoot(streamer.address, "episode-1", 10, "ipfs://episode");
+      await expect(
+        streamTree.mintBranch(1, ethers.ZeroAddress, "card-1", "ipfs://card")
+      ).to.be.revertedWith("Invalid holder address");
+    });
+
+    it("Should reject duplicate card IDs", async function () {
+      await streamTree.createRoot(streamer.address, "episode-1", 10, "ipfs://episode");
+      await streamTree.mintBranch(1, viewer1.address, "card-1", "ipfs://card");
+      await expect(
+        streamTree.mintBranch(1, viewer2.address, "card-1", "ipfs://card-2")
+      ).to.be.revertedWith("Card already exists");
+    });
+
+    it("Should reject minting for non-existent root", async function () {
+      await expect(
+        streamTree.mintBranch(999, viewer1.address, "card-1", "ipfs://card")
+      ).to.be.revertedWith("Root does not exist");
+    });
+
+    it("Should reject fruiting non-existent branch", async function () {
+      await expect(
+        streamTree.mintFruit(999, 10, 1, "ipfs://fruit")
+      ).to.be.revertedWith("Branch does not exist");
+    });
+
+    it("Should reject batch with array length mismatch", async function () {
+      await streamTree.createRoot(streamer.address, "episode-1", 10, "ipfs://episode");
+      await streamTree.mintBranch(1, viewer1.address, "card-1", "ipfs://card");
+      await streamTree.endRoot(1);
+
+      await expect(
+        streamTree.batchMintFruit(
+          [1_000_000],
+          [10, 20], // mismatched length
+          [1],
+          ["ipfs://fruit"]
+        )
+      ).to.be.revertedWith("Array length mismatch");
+    });
+
+    it("Should reject zero address for platform", async function () {
+      await expect(
+        streamTree.setPlatformAddress(ethers.ZeroAddress)
+      ).to.be.revertedWith("Invalid address");
+    });
+
+    it("Should emit PlatformAddressUpdated event", async function () {
+      const tx = await streamTree.setPlatformAddress(viewer1.address);
+      await expect(tx)
+        .to.emit(streamTree, "PlatformAddressUpdated")
+        .withArgs(platform.address, viewer1.address);
+    });
+  });
+
   describe("Access Control", function () {
     it("Should allow owner to authorize minters", async function () {
       await streamTree.setAuthorizedMinter(viewer1.address, true);
