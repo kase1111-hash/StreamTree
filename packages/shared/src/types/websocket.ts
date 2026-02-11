@@ -17,7 +17,6 @@ export interface EventFiredEvent {
   triggeredBy?: string;
   cardsAffected?: number;
   twitchInfo?: { title: string; description: string };
-  chatInfo?: { keyword: string; username?: string };
 }
 
 export interface CardUpdatedEvent {

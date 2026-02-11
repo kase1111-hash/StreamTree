@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
-import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice } from '@streamtree/shared';
+import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice, detectPatterns } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats } from '../websocket/server.js';
 import {
   isBlockchainConfigured,
@@ -446,32 +446,17 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
 });
 
 // Get episode stats
-// Note: Uses authMiddleware (applied globally) + internal auth check for owner/collaborator access
 router.get('/:id/stats', async (req: AuthenticatedRequest, res, next) => {
   try {
     const episode = await prisma.episode.findUnique({
       where: { id: req.params.id },
-      include: {
-        collaborators: {
-          where: {
-            userId: req.user!.id,
-            status: 'accepted',
-          },
-        },
-      },
     });
 
     if (!episode) {
       throw new AppError('Episode not found', 404, 'NOT_FOUND');
     }
 
-    // Check if user is owner or collaborator with view_stats permission
-    const isOwner = episode.streamerId === req.user!.id;
-    const collaborator = episode.collaborators[0];
-    const hasViewPermission = collaborator &&
-      (collaborator.permissions as string[]).includes('view_stats');
-
-    if (!isOwner && !hasViewPermission) {
+    if (episode.streamerId !== req.user!.id) {
       throw new AppError('Not authorized', 403, 'FORBIDDEN');
     }
 
@@ -722,32 +707,17 @@ router.delete('/:id/events/:eventId', requireStreamer, async (req: Authenticated
 });
 
 // Fire event
-// Note: Uses authMiddleware (applied globally) + internal auth check for owner/collaborator access
-router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, next) => {
+router.post('/:id/events/:eventId/fire', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
   try {
     const episode = await prisma.episode.findUnique({
       where: { id: req.params.id },
-      include: {
-        collaborators: {
-          where: {
-            userId: req.user!.id,
-            status: 'accepted',
-          },
-        },
-      },
     });
 
     if (!episode) {
       throw new AppError('Episode not found', 404, 'NOT_FOUND');
     }
 
-    // Check if user is owner or authorized collaborator
-    const isOwner = episode.streamerId === req.user!.id;
-    const collaborator = episode.collaborators[0];
-    const hasFirePermission = collaborator &&
-      (collaborator.permissions as string[]).includes('fire_events');
-
-    if (!isOwner && !hasFirePermission) {
+    if (episode.streamerId !== req.user!.id) {
       throw new AppError('Not authorized', 403, 'FORBIDDEN');
     }
 
@@ -803,7 +773,7 @@ router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, 
         const markedCount = grid.flat().filter((sq) => sq.marked).length;
 
         // Detect patterns
-        const patterns = detectCardPatterns(grid);
+        const patterns = detectPatterns(grid);
 
         await prisma.card.update({
           where: { id: card.id },
@@ -826,12 +796,11 @@ router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, 
     }
 
     // Record fired event
-    const firedByUser = isOwner ? 'owner' : `collaborator:${req.user!.id}`;
     const firedEvent = await prisma.firedEvent.create({
       data: {
         episodeId: episode.id,
         eventDefinitionId: event.id,
-        firedBy: firedByUser,
+        firedBy: 'owner',
         cardsAffected,
       },
     });
@@ -868,42 +837,5 @@ router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, 
     next(error);
   }
 });
-
-// Helper function to detect patterns
-function detectCardPatterns(grid: any[][]): any[] {
-  const patterns: any[] = [];
-  const size = grid.length;
-
-  // Check rows
-  for (let row = 0; row < size; row++) {
-    if (grid[row].every((sq: any) => sq.marked)) {
-      patterns.push({ type: 'row', index: row });
-    }
-  }
-
-  // Check columns
-  for (let col = 0; col < size; col++) {
-    if (grid.every((row) => row[col].marked)) {
-      patterns.push({ type: 'column', index: col });
-    }
-  }
-
-  // Check diagonals
-  let mainDiag = true;
-  let antiDiag = true;
-  for (let i = 0; i < size; i++) {
-    if (!grid[i][i].marked) mainDiag = false;
-    if (!grid[i][size - 1 - i].marked) antiDiag = false;
-  }
-  if (mainDiag) patterns.push({ type: 'diagonal', direction: 'main' });
-  if (antiDiag) patterns.push({ type: 'diagonal', direction: 'anti' });
-
-  // Check blackout
-  if (grid.every((row) => row.every((sq: any) => sq.marked))) {
-    patterns.push({ type: 'blackout' });
-  }
-
-  return patterns;
-}
 
 export { router as episodesRouter };
