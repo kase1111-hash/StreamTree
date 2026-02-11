@@ -174,6 +174,12 @@ export const cardsApi = {
   mint: (episodeId: string, token: string) =>
     api<any>(`/api/cards/mint/${episodeId}`, { method: 'POST', token }),
 
+  createPaymentIntent: (episodeId: string, token: string) =>
+    api<{ clientSecret: string; paymentIntentId: string; amount: number }>(
+      `/api/cards/mint/${episodeId}/payment`,
+      { method: 'POST', token }
+    ),
+
   getGallery: (token: string) =>
     api<any[]>('/api/cards/gallery/all', { token }),
 };

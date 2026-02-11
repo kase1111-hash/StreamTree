@@ -8,12 +8,14 @@ import { publicApi, cardsApi } from '@/lib/api';
 import { useWebSocket, useEpisodeEvents, useCardEvents } from '@/lib/websocket';
 import { CardRenderer } from '@/components/CardRenderer';
 import { Leaderboard } from '@/components/Leaderboard';
+import { PaymentModal } from '@/components/PaymentModal';
 
 interface PublicEpisode {
   id: string;
   name: string;
   artworkUrl: string | null;
   status: string;
+  cardPrice: number;
   cardsMinted: number;
   maxCards: number | null;
   gridSize: number;
@@ -44,6 +46,12 @@ export default function PlayPage() {
   const [loading, setLoading] = useState(true);
   const [minting, setMinting] = useState(false);
   const [error, setError] = useState('');
+
+  // Payment state
+  const [showPayment, setShowPayment] = useState(false);
+  const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState(0);
+  const [waitingForCard, setWaitingForCard] = useState(false);
 
   useEffect(() => {
     loadEpisode();
@@ -101,8 +109,12 @@ export default function PlayPage() {
       loadLeaderboard();
     } else if (event.type === 'episode:state' && event.status === 'ended') {
       setEpisode((prev) => (prev ? { ...prev, status: 'ended' } : prev));
+    } else if (event.type === 'card:minted' && event.holderId === user?.id) {
+      // Our paid card was created by the webhook — load it
+      setWaitingForCard(false);
+      loadMyCard();
     }
-  }, []);
+  }, [user?.id]);
 
   // Handle card updates
   const handleCardEvent = useCallback((event: any) => {
@@ -144,13 +156,46 @@ export default function PlayPage() {
     setMinting(true);
     setError('');
 
-    try {
-      const newCard = await cardsApi.mint(episode.id, token);
-      setCard(newCard);
-    } catch (err: any) {
-      setError(err.message || 'Failed to mint card');
+    if (episode.cardPrice > 0) {
+      // Paid card — create payment intent and show modal
+      try {
+        const { clientSecret: secret, amount } = await cardsApi.createPaymentIntent(episode.id, token);
+        setClientSecret(secret);
+        setPaymentAmount(amount);
+        setShowPayment(true);
+      } catch (err: any) {
+        setError(err.message || 'Failed to start payment');
+      }
+      setMinting(false);
+    } else {
+      // Free card — mint directly
+      try {
+        const newCard = await cardsApi.mint(episode.id, token);
+        setCard(newCard);
+      } catch (err: any) {
+        setError(err.message || 'Failed to mint card');
+      }
+      setMinting(false);
     }
+  };
 
+  const handlePaymentSuccess = () => {
+    // Payment confirmed — wait for webhook to create card
+    setShowPayment(false);
+    setClientSecret(null);
+    setWaitingForCard(true);
+  };
+
+  const handlePaymentCancel = () => {
+    setShowPayment(false);
+    setClientSecret(null);
+    setMinting(false);
+  };
+
+  const handlePaymentError = (message: string) => {
+    setShowPayment(false);
+    setClientSecret(null);
+    setError(message);
     setMinting(false);
   };
 
@@ -217,6 +262,18 @@ export default function PlayPage() {
         </div>
       )}
 
+      {/* Payment Modal */}
+      {showPayment && clientSecret && episode && (
+        <PaymentModal
+          clientSecret={clientSecret}
+          amount={paymentAmount}
+          episodeName={episode.name}
+          onSuccess={handlePaymentSuccess}
+          onCancel={handlePaymentCancel}
+          onError={handlePaymentError}
+        />
+      )}
+
       {/* Card or Mint CTA */}
       {card ? (
         <div className="mb-8">
@@ -253,6 +310,18 @@ export default function PlayPage() {
             )}
           </div>
         </div>
+      ) : waitingForCard ? (
+        <div className="text-center mb-8">
+          <div className="bg-white dark:bg-gray-900 p-8 rounded-xl shadow-lg max-w-md mx-auto">
+            <div className="flex justify-center mb-4">
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600" />
+            </div>
+            <h2 className="text-xl font-semibold mb-2">Payment received!</h2>
+            <p className="text-gray-600 dark:text-gray-400">
+              Creating your card...
+            </p>
+          </div>
+        </div>
       ) : isLive ? (
         <div className="text-center mb-8">
           <div className="bg-white dark:bg-gray-900 p-8 rounded-xl shadow-lg max-w-md mx-auto">
@@ -273,7 +342,13 @@ export default function PlayPage() {
                 disabled={minting}
                 className="w-full px-6 py-3 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 disabled:opacity-50 transition"
               >
-                {minting ? 'Minting...' : user ? 'Mint Card (Free)' : 'Sign in to Mint'}
+                {minting
+                  ? 'Processing...'
+                  : !user
+                    ? 'Sign in to Play'
+                    : episode.cardPrice > 0
+                      ? `Buy Card \u2014 $${(episode.cardPrice / 100).toFixed(2)}`
+                      : 'Mint Card (Free)'}
               </button>
             )}
           </div>

@@ -138,6 +138,78 @@ describe('Code Validation', () => {
     });
   });
 
+  describe('Paid Card Flow (Phase 2)', () => {
+    it('should have payment intent endpoint in cards route', () => {
+      const cardsPath = join(API_ROOT, 'src/routes/cards.ts');
+      const cards = readFileSync(cardsPath, 'utf-8');
+
+      expect(cards).toContain("router.post('/mint/:episodeId/payment'");
+      expect(cards).toContain('createPaymentIntent');
+      expect(cards).toContain('pendingPayment');
+    });
+
+    it('should not have NOT_IMPLEMENTED block for paid cards', () => {
+      const cardsPath = join(API_ROOT, 'src/routes/cards.ts');
+      const cards = readFileSync(cardsPath, 'utf-8');
+
+      expect(cards).not.toContain('NOT_IMPLEMENTED');
+      expect(cards).toContain('PAYMENT_REQUIRED');
+    });
+
+    it('should handle paid card creation in Stripe webhook', () => {
+      const webhooksPath = join(API_ROOT, 'src/routes/webhooks.ts');
+      const webhooks = readFileSync(webhooksPath, 'utf-8');
+
+      // Should mark already-fired events on new cards
+      expect(webhooks).toContain('firedEventIds');
+      expect(webhooks).toContain('markedCount');
+
+      // Should update pending payment status
+      expect(webhooks).toContain('pendingPayment.updateMany');
+
+      // Should notify specific user
+      expect(webhooks).toContain('sendToUser(userId');
+    });
+
+    it('should have createPaymentIntent in frontend API client', () => {
+      const apiPath = join(WEB_ROOT, 'src/lib/api.ts');
+      const api = readFileSync(apiPath, 'utf-8');
+
+      expect(api).toContain('createPaymentIntent');
+      expect(api).toContain('clientSecret');
+    });
+
+    it('should have PaymentModal component', () => {
+      const modalPath = join(WEB_ROOT, 'src/components/PaymentModal.tsx');
+      expect(existsSync(modalPath)).toBe(true);
+
+      const modal = readFileSync(modalPath, 'utf-8');
+      expect(modal).toContain('PaymentModal');
+      expect(modal).toContain('clientSecret');
+      expect(modal).toContain('onSuccess');
+      expect(modal).toContain('stripe');
+    });
+
+    it('should have paid card flow in play page', () => {
+      const playPath = join(WEB_ROOT, 'src/app/play/[code]/page.tsx');
+      const play = readFileSync(playPath, 'utf-8');
+
+      // Should import PaymentModal
+      expect(play).toContain('PaymentModal');
+
+      // Should have cardPrice in episode interface
+      expect(play).toContain('cardPrice');
+
+      // Should show different button text for paid vs free
+      expect(play).toContain('Buy Card');
+      expect(play).toContain('Mint Card (Free)');
+
+      // Should have waiting state for webhook card creation
+      expect(play).toContain('waitingForCard');
+      expect(play).toContain('Payment received');
+    });
+  });
+
   describe('Gallery Enhancements', () => {
     it('should have enhanced gallery page with filtering', () => {
       const galleryPath = join(WEB_ROOT, 'src/app/gallery/page.tsx');

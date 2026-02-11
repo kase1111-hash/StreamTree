@@ -140,15 +140,40 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     return;
   }
 
-  // Generate card grid
+  // Generate card grid with full event definition mapping
+  type EventDef = typeof episode.eventDefinitions[number];
   const grid = generateCardGrid(
-    episode.eventDefinitions.map((e: { id: string; name: string; icon: string }) => ({
+    episode.eventDefinitions.map((e: EventDef) => ({
       id: e.id,
+      episodeId: e.episodeId,
       name: e.name,
       icon: e.icon,
+      description: e.description,
+      triggerType: e.triggerType as 'manual' | 'twitch' | 'custom',
+      triggerConfig: e.triggerConfig as Record<string, unknown> | null,
+      firedAt: e.firedAt,
+      firedCount: e.firedCount,
+      createdAt: e.createdAt,
+      order: e.sortOrder,
     })),
     episode.gridSize
   );
+
+  // Mark any already-fired events on the new card
+  const firedEventIds = episode.eventDefinitions
+    .filter((e: EventDef) => e.firedAt !== null)
+    .map((e: EventDef) => e.id);
+
+  let markedCount = 0;
+  for (let row = 0; row < grid.length; row++) {
+    for (let col = 0; col < grid[row].length; col++) {
+      if (firedEventIds.includes(grid[row][col].eventId)) {
+        grid[row][col].marked = true;
+        grid[row][col].markedAt = new Date();
+        markedCount++;
+      }
+    }
+  }
 
   // Get next card number
   const cardNumber = episode.cardsMinted + 1;
@@ -158,7 +183,8 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     data: {
       episodeId,
       holderId: userId,
-      grid,
+      grid: grid as any,
+      markedSquares: markedCount,
       paymentId: paymentIntent.id,
       pricePaid: paymentIntent.amount,
       cardNumber,
@@ -174,7 +200,25 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     },
   });
 
-  // Broadcast updates
+  // Mark pending payment as completed
+  await prisma.pendingPayment.updateMany({
+    where: {
+      paymentIntentId: paymentIntent.id,
+      status: 'pending',
+    },
+    data: { status: 'completed' },
+  });
+
+  // Notify the specific user that their card was minted
+  sendToUser(userId, {
+    type: 'card:minted',
+    cardId: card.id,
+    episodeId,
+    holderId: userId,
+    cardNumber,
+  });
+
+  // Broadcast to episode room
   broadcastToEpisode(episodeId, {
     type: 'card:minted',
     cardId: card.id,
@@ -184,13 +228,30 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
 
   broadcastStats(episodeId);
 
-  console.log('Card created successfully:', card.id);
+  console.log('Paid card created successfully:', card.id, 'for user:', userId);
 }
 
 async function handlePaymentFailed(paymentIntent: Stripe.PaymentIntent) {
   const { episodeId, userId } = paymentIntent.metadata;
   console.log('Payment failed for episode:', episodeId, 'user:', userId);
-  // Could notify the user here
+
+  // Mark pending payment as failed
+  await prisma.pendingPayment.updateMany({
+    where: {
+      paymentIntentId: paymentIntent.id,
+      status: 'pending',
+    },
+    data: { status: 'failed' },
+  });
+
+  // Notify user
+  if (userId) {
+    sendToUser(userId, {
+      type: 'error',
+      message: 'Payment failed. Please try again.',
+      code: 'PAYMENT_FAILED',
+    });
+  }
 }
 
 async function handleAccountUpdated(account: Stripe.Account) {
