@@ -66,8 +66,9 @@ function validateRedirectUrl(redirectUrl: string | undefined): string {
   }
 }
 
-// In-memory state storage (use Redis in production)
+// In-memory state storage (use Redis in production for multi-instance deployments)
 const oauthStates = new Map<string, { userId: string; redirectUrl?: string; expiresAt: number }>();
+const MAX_OAUTH_STATES = 1000; // Prevent memory exhaustion from rapid requests
 
 // Clean up expired states periodically
 setInterval(() => {
@@ -117,6 +118,23 @@ router.get('/connect', requireStreamer, async (req: AuthenticatedRequest, res) =
   // Generate state for CSRF protection
   const state = crypto.randomBytes(32).toString('hex');
   const redirectUrl = req.query.redirect as string | undefined;
+
+  // Enforce size cap to prevent memory exhaustion
+  if (oauthStates.size >= MAX_OAUTH_STATES) {
+    // Evict oldest entries until under limit
+    const now = Date.now();
+    for (const [key, data] of oauthStates.entries()) {
+      if (oauthStates.size < MAX_OAUTH_STATES) break;
+      if (data.expiresAt < now) {
+        oauthStates.delete(key);
+      }
+    }
+    // If still at capacity after expiry cleanup, evict oldest
+    if (oauthStates.size >= MAX_OAUTH_STATES) {
+      const firstKey = oauthStates.keys().next().value;
+      if (firstKey) oauthStates.delete(firstKey);
+    }
+  }
 
   oauthStates.set(state, {
     userId: req.user!.id,
