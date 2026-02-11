@@ -73,13 +73,11 @@ export interface EventDefinition {
   order: number;
 }
 
-export type TriggerType = 'manual' | 'twitch' | 'webhook' | 'chat';
+export type TriggerType = 'manual' | 'twitch';
 
 export type TriggerConfig =
   | ManualTriggerConfig
-  | TwitchTriggerConfig
-  | ChatTriggerConfig
-  | WebhookTriggerConfig;
+  | TwitchTriggerConfig;
 
 export interface ManualTriggerConfig {
   type: 'manual';
@@ -89,18 +87,6 @@ export interface TwitchTriggerConfig {
   type: 'twitch';
   event: 'subscription' | 'donation' | 'raid' | 'bits';
   threshold?: number;
-}
-
-export interface ChatTriggerConfig {
-  type: 'chat';
-  keyword: string;
-  minOccurrences: number;
-  timeWindowSec: number;
-}
-
-export interface WebhookTriggerConfig {
-  type: 'webhook';
-  secret: string;
 }
 
 export interface CreateEventInput {

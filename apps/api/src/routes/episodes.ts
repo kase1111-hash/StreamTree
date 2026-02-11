@@ -2,10 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
-import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice, detectPatterns as _detectPatterns } from '@streamtree/shared';
-
-// Cast to any[] for Prisma JSON compatibility
-const detectPatterns = (grid: any[][]): any[] => _detectPatterns(grid) as any[];
+import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice, detectPatterns } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats } from '../websocket/server.js';
 import {
   isBlockchainConfigured,
@@ -449,32 +446,17 @@ router.post('/:id/end', requireStreamer, async (req: AuthenticatedRequest, res, 
 });
 
 // Get episode stats
-// Note: Uses authMiddleware (applied globally) + internal auth check for owner/collaborator access
 router.get('/:id/stats', async (req: AuthenticatedRequest, res, next) => {
   try {
     const episode = await prisma.episode.findUnique({
       where: { id: req.params.id },
-      include: {
-        collaborators: {
-          where: {
-            userId: req.user!.id,
-            status: 'accepted',
-          },
-        },
-      },
     });
 
     if (!episode) {
       throw new AppError('Episode not found', 404, 'NOT_FOUND');
     }
 
-    // Check if user is owner or collaborator with view_stats permission
-    const isOwner = episode.streamerId === req.user!.id;
-    const collaborator = episode.collaborators[0];
-    const hasViewPermission = collaborator &&
-      (collaborator.permissions as string[]).includes('view_stats');
-
-    if (!isOwner && !hasViewPermission) {
+    if (episode.streamerId !== req.user!.id) {
       throw new AppError('Not authorized', 403, 'FORBIDDEN');
     }
 
@@ -603,19 +585,6 @@ router.post('/:id/events', requireStreamer, async (req: AuthenticatedRequest, re
       throw new AppError('Event name is required', 400, 'VALIDATION_ERROR');
     }
 
-    // Validate triggerType
-    const validTriggerTypes = ['manual', 'twitch', 'chat', 'webhook'];
-    if (!validTriggerTypes.includes(triggerType)) {
-      throw new AppError(
-        `Invalid triggerType. Must be one of: ${validTriggerTypes.join(', ')}`,
-        400,
-        'VALIDATION_ERROR'
-      );
-    }
-
-    // Validate triggerConfig matches the triggerType schema
-    const validatedConfig = validateTriggerConfig(triggerType, triggerConfig);
-
     // Get current max order
     const maxOrder = await prisma.eventDefinition.aggregate({
       where: { episodeId: episode.id },
@@ -629,7 +598,7 @@ router.post('/:id/events', requireStreamer, async (req: AuthenticatedRequest, re
         icon,
         description,
         triggerType,
-        triggerConfig: (validatedConfig as any) ?? undefined,
+        triggerConfig,
         sortOrder: (maxOrder._max.sortOrder ?? -1) + 1,
       },
     });
@@ -680,20 +649,10 @@ router.patch('/:id/events/:eventId', requireStreamer, async (req: AuthenticatedR
       updateData.description = description;
     }
     if (triggerType !== undefined) {
-      const validTriggerTypes = ['manual', 'twitch', 'chat', 'webhook'];
-      if (!validTriggerTypes.includes(triggerType)) {
-        throw new AppError(
-          `Invalid triggerType. Must be one of: ${validTriggerTypes.join(', ')}`,
-          400,
-          'VALIDATION_ERROR'
-        );
-      }
       updateData.triggerType = triggerType;
     }
     if (triggerConfig !== undefined) {
-      // Use the effective triggerType (new value or existing)
-      const effectiveType = (triggerType as string) || event.triggerType;
-      updateData.triggerConfig = validateTriggerConfig(effectiveType, triggerConfig) ?? undefined;
+      updateData.triggerConfig = triggerConfig;
     }
     if (order !== undefined) {
       updateData.sortOrder = order;
@@ -748,32 +707,17 @@ router.delete('/:id/events/:eventId', requireStreamer, async (req: Authenticated
 });
 
 // Fire event
-// Note: Uses authMiddleware (applied globally) + internal auth check for owner/collaborator access
-router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, next) => {
+router.post('/:id/events/:eventId/fire', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
   try {
     const episode = await prisma.episode.findUnique({
       where: { id: req.params.id },
-      include: {
-        collaborators: {
-          where: {
-            userId: req.user!.id,
-            status: 'accepted',
-          },
-        },
-      },
     });
 
     if (!episode) {
       throw new AppError('Episode not found', 404, 'NOT_FOUND');
     }
 
-    // Check if user is owner or authorized collaborator
-    const isOwner = episode.streamerId === req.user!.id;
-    const collaborator = episode.collaborators[0];
-    const hasFirePermission = collaborator &&
-      (collaborator.permissions as string[]).includes('fire_events');
-
-    if (!isOwner && !hasFirePermission) {
+    if (episode.streamerId !== req.user!.id) {
       throw new AppError('Not authorized', 403, 'FORBIDDEN');
     }
 
@@ -852,12 +796,11 @@ router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, 
     }
 
     // Record fired event
-    const firedByUser = isOwner ? 'owner' : `collaborator:${req.user!.id}`;
     const firedEvent = await prisma.firedEvent.create({
       data: {
         episodeId: episode.id,
         eventDefinitionId: event.id,
-        firedBy: firedByUser,
+        firedBy: 'owner',
         cardsAffected,
       },
     });
@@ -894,73 +837,5 @@ router.post('/:id/events/:eventId/fire', async (req: AuthenticatedRequest, res, 
     next(error);
   }
 });
-
-// Valid Twitch event types for triggerConfig validation
-const VALID_TWITCH_EVENTS = [
-  'follow', 'subscription', 'gift_sub', 'cheer', 'raid', 'redemption',
-];
-
-/**
- * Validate triggerConfig against its triggerType schema.
- * Returns the validated (and sanitized) config, or null for types that don't use config.
- */
-function validateTriggerConfig(triggerType: string, triggerConfig: unknown): Record<string, unknown> | null {
-  if (triggerType === 'manual') {
-    // Manual events don't use triggerConfig
-    return null;
-  }
-
-  if (triggerType === 'twitch') {
-    if (!triggerConfig || typeof triggerConfig !== 'object') {
-      throw new AppError(
-        'triggerConfig is required for twitch events and must include twitchEvent',
-        400,
-        'VALIDATION_ERROR'
-      );
-    }
-
-    const config = triggerConfig as Record<string, unknown>;
-
-    if (!config.twitchEvent || typeof config.twitchEvent !== 'string') {
-      throw new AppError(
-        'triggerConfig.twitchEvent is required for twitch events',
-        400,
-        'VALIDATION_ERROR'
-      );
-    }
-
-    if (!VALID_TWITCH_EVENTS.includes(config.twitchEvent)) {
-      throw new AppError(
-        `Invalid twitchEvent. Must be one of: ${VALID_TWITCH_EVENTS.join(', ')}`,
-        400,
-        'VALIDATION_ERROR'
-      );
-    }
-
-    if (config.threshold !== undefined) {
-      if (typeof config.threshold !== 'number' || config.threshold < 0 || !Number.isFinite(config.threshold)) {
-        throw new AppError(
-          'triggerConfig.threshold must be a non-negative number',
-          400,
-          'VALIDATION_ERROR'
-        );
-      }
-    }
-
-    // Return only validated fields
-    return {
-      twitchEvent: config.twitchEvent,
-      ...(config.threshold !== undefined ? { threshold: config.threshold } : {}),
-    };
-  }
-
-  if (triggerType === 'chat' || triggerType === 'webhook') {
-    // Chat and webhook events use triggerConfig optionally for metadata
-    // No strict schema required — config is informational
-    return (triggerConfig as Record<string, unknown>) ?? null;
-  }
-
-  return null;
-}
 
 export { router as episodesRouter };

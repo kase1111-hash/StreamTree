@@ -5,8 +5,6 @@ export type {
   TriggerConfig,
   ManualTriggerConfig,
   TwitchTriggerConfig,
-  ChatTriggerConfig,
-  WebhookTriggerConfig,
   CreateEventInput,
   UpdateEventInput,
   FiredEvent,

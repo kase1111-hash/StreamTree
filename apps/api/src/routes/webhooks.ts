@@ -1,12 +1,8 @@
 import { Router, Request, Response } from 'express';
-import crypto from 'crypto';
 import Stripe from 'stripe';
 import { prisma } from '../db/client.js';
 import { stripe, createRefund } from '../services/stripe.service.js';
-import { generateCardGrid, detectPatterns as _detectPatterns } from '@streamtree/shared';
-
-// Cast to any[] for Prisma JSON compatibility
-const detectPatterns = (grid: any[][]): any[] => _detectPatterns(grid) as any[];
+import { generateCardGrid, detectPatterns } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats, sendToUser } from '../websocket/server.js';
 import {
   verifyWebhookSignature,
@@ -144,15 +140,40 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     return;
   }
 
-  // Generate card grid
+  // Generate card grid with full event definition mapping
+  type EventDef = typeof episode.eventDefinitions[number];
   const grid = generateCardGrid(
-    episode.eventDefinitions.map((e: { id: string; name: string; icon: string }) => ({
+    episode.eventDefinitions.map((e: EventDef) => ({
       id: e.id,
+      episodeId: e.episodeId,
       name: e.name,
       icon: e.icon,
+      description: e.description,
+      triggerType: e.triggerType as 'manual' | 'twitch' | 'custom',
+      triggerConfig: e.triggerConfig as Record<string, unknown> | null,
+      firedAt: e.firedAt,
+      firedCount: e.firedCount,
+      createdAt: e.createdAt,
+      order: e.sortOrder,
     })),
     episode.gridSize
   );
+
+  // Mark any already-fired events on the new card
+  const firedEventIds = episode.eventDefinitions
+    .filter((e: EventDef) => e.firedAt !== null)
+    .map((e: EventDef) => e.id);
+
+  let markedCount = 0;
+  for (let row = 0; row < grid.length; row++) {
+    for (let col = 0; col < grid[row].length; col++) {
+      if (firedEventIds.includes(grid[row][col].eventId)) {
+        grid[row][col].marked = true;
+        grid[row][col].markedAt = new Date();
+        markedCount++;
+      }
+    }
+  }
 
   // Get next card number
   const cardNumber = episode.cardsMinted + 1;
@@ -162,7 +183,8 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     data: {
       episodeId,
       holderId: userId,
-      grid,
+      grid: grid as any,
+      markedSquares: markedCount,
       paymentId: paymentIntent.id,
       pricePaid: paymentIntent.amount,
       cardNumber,
@@ -178,7 +200,25 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     },
   });
 
-  // Broadcast updates
+  // Mark pending payment as completed
+  await prisma.pendingPayment.updateMany({
+    where: {
+      paymentIntentId: paymentIntent.id,
+      status: 'pending',
+    },
+    data: { status: 'completed' },
+  });
+
+  // Notify the specific user that their card was minted
+  sendToUser(userId, {
+    type: 'card:minted',
+    cardId: card.id,
+    episodeId,
+    holderId: userId,
+    cardNumber,
+  });
+
+  // Broadcast to episode room
   broadcastToEpisode(episodeId, {
     type: 'card:minted',
     cardId: card.id,
@@ -188,13 +228,30 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
 
   broadcastStats(episodeId);
 
-  console.log('Card created successfully:', card.id);
+  console.log('Paid card created successfully:', card.id, 'for user:', userId);
 }
 
 async function handlePaymentFailed(paymentIntent: Stripe.PaymentIntent) {
   const { episodeId, userId } = paymentIntent.metadata;
   console.log('Payment failed for episode:', episodeId, 'user:', userId);
-  // Could notify the user here
+
+  // Mark pending payment as failed
+  await prisma.pendingPayment.updateMany({
+    where: {
+      paymentIntentId: paymentIntent.id,
+      status: 'pending',
+    },
+    data: { status: 'failed' },
+  });
+
+  // Notify user
+  if (userId) {
+    sendToUser(userId, {
+      type: 'error',
+      message: 'Payment failed. Please try again.',
+      code: 'PAYMENT_FAILED',
+    });
+  }
 }
 
 async function handleAccountUpdated(account: Stripe.Account) {
@@ -415,189 +472,6 @@ async function fireEventFromTwitch(
   } catch (error) {
     console.error('Error firing Twitch event:', sanitizeError(error));
   }
-}
-
-// Custom webhook handler for external integrations
-router.post('/custom/:webhookId', async (req: Request, res: Response) => {
-  const { webhookId } = req.params;
-  const signature = req.headers['x-streamtree-signature'] as string;
-
-  // Find the webhook
-  const webhook = await prisma.customWebhook.findUnique({
-    where: { id: webhookId },
-    include: {
-      episode: {
-        include: {
-          eventDefinitions: true,
-        },
-      },
-    },
-  });
-
-  if (!webhook || !webhook.isActive) {
-    return res.status(404).json({ error: 'Webhook not found or inactive' });
-  }
-
-  // SECURITY: Always require signature verification
-  // This prevents unauthorized triggering of events by anyone who knows the webhook ID
-  if (!signature) {
-    console.warn(`Custom webhook ${webhookId} called without signature`);
-    return res.status(401).json({
-      error: 'Missing signature',
-      message: 'The x-streamtree-signature header is required. Sign the request body with HMAC-SHA256 using your webhook secret.',
-    });
-  }
-
-  // Verify the signature using timing-safe comparison
-  const body = JSON.stringify(req.body);
-  const expectedSignature =
-    'sha256=' +
-    crypto.createHmac('sha256', webhook.secret).update(body).digest('hex');
-
-  // Use timing-safe comparison to prevent timing attacks
-  let signatureValid = false;
-  try {
-    signatureValid =
-      signature.length === expectedSignature.length &&
-      crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
-  } catch {
-    signatureValid = false;
-  }
-
-  if (!signatureValid) {
-    console.warn(`Custom webhook ${webhookId} called with invalid signature`);
-    return res.status(401).json({ error: 'Invalid signature' });
-  }
-
-  // Check if episode is live
-  if (webhook.episode.status !== 'live') {
-    return res.status(400).json({ error: 'Episode is not live' });
-  }
-
-  const { eventName, eventId } = req.body;
-
-  // Find matching event
-  let targetEvent = webhook.episode.eventDefinitions.find((e: { id: string; name: string }) => e.id === eventId);
-
-  if (!targetEvent && eventName) {
-    targetEvent = webhook.episode.eventDefinitions.find(
-      (e: { id: string; name: string }) => e.name.toLowerCase() === eventName.toLowerCase()
-    );
-  }
-
-  if (!targetEvent) {
-    return res.status(400).json({
-      error: 'Event not found. Provide eventId or eventName.',
-    });
-  }
-
-  // Fire the event
-  try {
-    await fireEventFromCustomWebhook(webhook.episode.id, targetEvent.id, req.body);
-
-    // Update webhook usage
-    await prisma.customWebhook.update({
-      where: { id: webhook.id },
-      data: {
-        lastUsedAt: new Date(),
-        usageCount: { increment: 1 },
-      },
-    });
-
-    res.json({
-      success: true,
-      message: `Event "${targetEvent.name}" fired successfully`,
-    });
-  } catch (error) {
-    console.error('Custom webhook error:', sanitizeError(error));
-    res.status(500).json({ error: 'Failed to fire event' });
-  }
-});
-
-async function fireEventFromCustomWebhook(
-  episodeId: string,
-  eventId: string,
-  webhookData: any
-) {
-  await prisma.eventDefinition.update({
-    where: { id: eventId },
-    data: {
-      firedAt: new Date(),
-      firedCount: { increment: 1 },
-    },
-  });
-
-  const cards = await prisma.card.findMany({
-    where: { episodeId, status: 'active' },
-  });
-
-  let cardsAffected = 0;
-
-  for (const card of cards) {
-    const grid = card.grid as any[][];
-    let updated = false;
-
-    for (let row = 0; row < grid.length; row++) {
-      for (let col = 0; col < grid[row].length; col++) {
-        if (grid[row][col].eventId === eventId && !grid[row][col].marked) {
-          grid[row][col].marked = true;
-          grid[row][col].markedAt = new Date();
-          updated = true;
-        }
-      }
-    }
-
-    if (updated) {
-      let markedCount = 0;
-      for (const row of grid) {
-        for (const cell of row) {
-          if (cell.marked) markedCount++;
-        }
-      }
-
-      const patterns = detectPatterns(grid);
-
-      await prisma.card.update({
-        where: { id: card.id },
-        data: { grid, markedSquares: markedCount, patterns },
-      });
-
-      cardsAffected++;
-
-      sendToUser(card.holderId, {
-        type: 'card:updated',
-        cardId: card.id,
-        markedSquares: markedCount,
-        patterns,
-        triggeredBy: 'webhook',
-      });
-    }
-  }
-
-  await prisma.firedEvent.create({
-    data: {
-      episodeId,
-      eventDefinitionId: eventId,
-      firedBy: 'webhook',
-      cardsAffected,
-      triggerData: webhookData,
-    },
-  });
-
-  const eventDef = await prisma.eventDefinition.findUnique({
-    where: { id: eventId },
-  });
-
-  broadcastToEpisode(episodeId, {
-    type: 'event:fired',
-    episodeId,
-    eventId,
-    eventName: eventDef?.name || 'Webhook Event',
-    triggeredBy: 'webhook',
-    cardsAffected,
-  });
-
-  console.log(`Custom webhook fired event ${eventId} for episode ${episodeId}, affected ${cardsAffected} cards`);
 }
 
 export { router as webhooksRouter };
