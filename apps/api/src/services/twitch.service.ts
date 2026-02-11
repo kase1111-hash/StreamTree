@@ -7,6 +7,64 @@ import crypto from 'crypto';
 import { prisma } from '../db/client.js';
 import { sanitizeError } from '../utils/sanitize.js';
 
+/**
+ * SECURITY: Encrypt/decrypt webhook secrets for database storage.
+ * Secrets need to remain recoverable for HMAC verification, so we use
+ * AES-256-GCM encryption rather than hashing.
+ *
+ * Requires WEBHOOK_SECRET_KEY env var (32-byte hex key).
+ * Falls back to plaintext storage if not configured (development only).
+ */
+const WEBHOOK_SECRET_KEY = process.env.WEBHOOK_SECRET_KEY || '';
+
+function isEncryptionConfigured(): boolean {
+  return WEBHOOK_SECRET_KEY.length === 64; // 32 bytes in hex
+}
+
+function encryptSecret(plaintext: string): string {
+  if (!isEncryptionConfigured()) return plaintext;
+
+  const key = Buffer.from(WEBHOOK_SECRET_KEY, 'hex');
+  const iv = crypto.randomBytes(12); // 96-bit IV for GCM
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+
+  let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag().toString('hex');
+
+  // Format: iv:authTag:ciphertext
+  return `enc:${iv.toString('hex')}:${authTag}:${encrypted}`;
+}
+
+function decryptSecret(stored: string): string {
+  // Plaintext secrets (legacy or dev) don't have the enc: prefix
+  if (!stored.startsWith('enc:')) return stored;
+
+  if (!isEncryptionConfigured()) {
+    console.warn('Encrypted secret found but WEBHOOK_SECRET_KEY not configured');
+    return stored;
+  }
+
+  const parts = stored.split(':');
+  if (parts.length !== 4) {
+    console.error('Malformed encrypted secret');
+    return stored;
+  }
+
+  const [, ivHex, authTagHex, ciphertext] = parts;
+  const key = Buffer.from(WEBHOOK_SECRET_KEY, 'hex');
+  const iv = Buffer.from(ivHex, 'hex');
+  const authTag = Buffer.from(authTagHex, 'hex');
+
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(authTag);
+
+  let decrypted = decipher.update(ciphertext, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+
+  return decrypted;
+}
+
 const TWITCH_CLIENT_ID = process.env.TWITCH_CLIENT_ID || '';
 const TWITCH_CLIENT_SECRET = process.env.TWITCH_CLIENT_SECRET || '';
 const TWITCH_REDIRECT_URI = process.env.TWITCH_REDIRECT_URI || 'http://localhost:3000/auth/callback/twitch';
@@ -49,7 +107,7 @@ let secretsCacheInitialized = false;
 
 /**
  * Initialize the webhook secrets cache from database
- * Called on server startup to load persisted secrets
+ * Called on server startup to load persisted secrets (decrypted into memory)
  */
 export async function initializeWebhookSecretsCache(): Promise<void> {
   try {
@@ -60,7 +118,11 @@ export async function initializeWebhookSecretsCache(): Promise<void> {
 
     webhookSecretsCache.clear();
     for (const sub of subscriptions) {
-      webhookSecretsCache.set(sub.subscriptionId, sub.secret);
+      try {
+        webhookSecretsCache.set(sub.subscriptionId, decryptSecret(sub.secret));
+      } catch (error) {
+        console.error(`Failed to decrypt secret for subscription ${sub.subscriptionId}:`, sanitizeError(error));
+      }
     }
 
     secretsCacheInitialized = true;
@@ -71,14 +133,15 @@ export async function initializeWebhookSecretsCache(): Promise<void> {
 }
 
 /**
- * Get webhook secret, checking cache first then database
+ * Get webhook secret, checking cache first then database.
+ * Returns the plaintext secret for HMAC verification.
  */
 async function getWebhookSecret(subscriptionId: string): Promise<string | null> {
-  // Check cache first
+  // Check cache first (always holds plaintext)
   const cached = webhookSecretsCache.get(subscriptionId);
   if (cached) return cached;
 
-  // Fall back to database
+  // Fall back to database (may be encrypted)
   try {
     const subscription = await prisma.twitchSubscription.findUnique({
       where: { subscriptionId },
@@ -86,9 +149,9 @@ async function getWebhookSecret(subscriptionId: string): Promise<string | null> 
     });
 
     if (subscription?.secret) {
-      // Update cache
-      webhookSecretsCache.set(subscriptionId, subscription.secret);
-      return subscription.secret;
+      const plaintext = decryptSecret(subscription.secret);
+      webhookSecretsCache.set(subscriptionId, plaintext);
+      return plaintext;
     }
   } catch (error) {
     console.error('Failed to fetch webhook secret from database:', sanitizeError(error));
@@ -98,28 +161,35 @@ async function getWebhookSecret(subscriptionId: string): Promise<string | null> 
 }
 
 /**
- * Get all webhook secrets from database
+ * Get all webhook secrets from database.
+ * Returns plaintext secrets for HMAC verification.
  */
 async function getAllWebhookSecrets(): Promise<string[]> {
-  // If cache is initialized and has values, use it
+  // If cache is initialized and has values, use it (cache holds plaintext)
   if (secretsCacheInitialized && webhookSecretsCache.size > 0) {
     return Array.from(webhookSecretsCache.values());
   }
 
-  // Otherwise fetch from database
+  // Otherwise fetch from database and decrypt
   try {
     const subscriptions = await prisma.twitchSubscription.findMany({
       where: { status: 'enabled' },
       select: { subscriptionId: true, secret: true },
     });
 
-    // Update cache while we're at it
+    const secrets: string[] = [];
     for (const sub of subscriptions) {
-      webhookSecretsCache.set(sub.subscriptionId, sub.secret);
+      try {
+        const plaintext = decryptSecret(sub.secret);
+        webhookSecretsCache.set(sub.subscriptionId, plaintext);
+        secrets.push(plaintext);
+      } catch (error) {
+        console.error(`Failed to decrypt secret for ${sub.subscriptionId}:`, sanitizeError(error));
+      }
     }
     secretsCacheInitialized = true;
 
-    return subscriptions.map((s: { subscriptionId: string; secret: string }) => s.secret);
+    return secrets;
   } catch (error) {
     console.error('Failed to fetch webhook secrets from database:', sanitizeError(error));
     return [];
@@ -320,7 +390,7 @@ export async function createEventSubSubscription(
     const data = await response.json() as { data: EventSubSubscription[] };
     const subscription = data.data[0];
 
-    // Store secret in database for persistence across server restarts
+    // Store encrypted secret in database for persistence across server restarts
     if (episodeId) {
       try {
         await prisma.twitchSubscription.create({
@@ -329,7 +399,7 @@ export async function createEventSubSubscription(
             subscriptionId: subscription.id,
             type,
             status: 'enabled',
-            secret, // Persisted in database
+            secret: encryptSecret(secret), // Encrypted at rest
           },
         });
       } catch (dbError) {
@@ -338,7 +408,7 @@ export async function createEventSubSubscription(
       }
     }
 
-    // Also cache in memory for quick access
+    // Cache plaintext in memory for quick HMAC verification
     webhookSecretsCache.set(subscription.id, secret);
 
     return subscription;
