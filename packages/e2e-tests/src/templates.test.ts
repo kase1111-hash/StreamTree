@@ -44,22 +44,18 @@ describe('Templates API', () => {
         body: {
           name: 'Gaming Template ' + randomString(),
           description: 'A test gaming template',
-          category: 'gaming',
           events: [
             { name: 'First Blood', icon: '🩸' },
             { name: 'Victory Royale', icon: '👑' },
           ],
           gridSize: 5,
-          isPublic: false,
         },
       });
 
       expect(response.success).toBe(true);
       expect(response.data).toBeDefined();
       expect(response.data.name).toContain('Gaming Template');
-      expect(response.data.category).toBe('gaming');
       expect(response.data.events).toHaveLength(2);
-      expect(response.data.isPublic).toBe(false);
     });
 
     it('should fail to create template without name', async () => {
@@ -96,15 +92,12 @@ describe('Templates API', () => {
         body: {
           name: 'From Episode Template ' + randomString(),
           description: 'Created from an episode',
-          category: 'gaming',
-          isPublic: true,
         },
       });
 
       expect(response.success).toBe(true);
       expect(response.data).toBeDefined();
       expect(response.data.events).toHaveLength(5);
-      expect(response.data.isPublic).toBe(true);
     });
 
     it('should fail to save template from another user\'s episode', async () => {
@@ -117,55 +110,6 @@ describe('Templates API', () => {
       });
 
       expect(response.success).toBe(false);
-    });
-  });
-
-  describe('Browse Templates', () => {
-    let publicTemplate: any;
-
-    beforeAll(async () => {
-      // Create a public template
-      const response = await api('/api/templates', {
-        method: 'POST',
-        token: streamer1.token,
-        body: {
-          name: 'Public Browse Template ' + randomString(),
-          description: 'A public template for browsing',
-          category: 'gaming',
-          events: [
-            { name: 'Event 1', icon: '🎮' },
-            { name: 'Event 2', icon: '🎯' },
-          ],
-          gridSize: 5,
-          isPublic: true,
-        },
-      });
-      publicTemplate = response.data;
-    });
-
-    it('should browse public templates without auth', async () => {
-      const response = await api('/api/templates/browse');
-
-      expect(response.success).toBe(true);
-      expect(Array.isArray(response.data)).toBe(true);
-    });
-
-    it('should filter templates by category', async () => {
-      const response = await api('/api/templates/browse?category=gaming');
-
-      expect(response.success).toBe(true);
-      expect(Array.isArray(response.data)).toBe(true);
-      // All returned templates should be in the gaming category
-      response.data.forEach((template: any) => {
-        expect(template.category).toBe('gaming');
-      });
-    });
-
-    it('should sort templates by popularity', async () => {
-      const response = await api('/api/templates/browse?sort=popular');
-
-      expect(response.success).toBe(true);
-      expect(Array.isArray(response.data)).toBe(true);
     });
   });
 
@@ -200,7 +144,6 @@ describe('Templates API', () => {
         body: {
           name: 'Update Test Template',
           events: [{ name: 'Test Event' }],
-          isPublic: false,
         },
       });
       templateToUpdate = response.data;
@@ -216,17 +159,6 @@ describe('Templates API', () => {
 
       expect(response.success).toBe(true);
       expect(response.data.name).toBe(newName);
-    });
-
-    it('should update template visibility', async () => {
-      const response = await api(`/api/templates/${templateToUpdate.id}`, {
-        method: 'PATCH',
-        token: streamer1.token,
-        body: { isPublic: true },
-      });
-
-      expect(response.success).toBe(true);
-      expect(response.data.isPublic).toBe(true);
     });
 
     it('should fail to update another user\'s template', async () => {
@@ -255,7 +187,6 @@ describe('Templates API', () => {
             { name: 'Event C', icon: '🅾️' },
           ],
           gridSize: 4,
-          isPublic: true,
         },
       });
       templateToUse = response.data;
@@ -282,7 +213,7 @@ describe('Templates API', () => {
       expect(response.data.eventDefinitions).toHaveLength(3);
     });
 
-    it('should allow other users to use public template', async () => {
+    it('should not allow other users to use template', async () => {
       const response = await api(`/api/templates/${templateToUse.id}/use`, {
         method: 'POST',
         token: streamer2.token,
@@ -291,30 +222,7 @@ describe('Templates API', () => {
         },
       });
 
-      expect(response.success).toBe(true);
-      expect(response.data.eventDefinitions).toHaveLength(3);
-    });
-
-    it('should increment usage count', async () => {
-      // Get template before use
-      const beforeResponse = await api(`/api/templates/${templateToUse.id}`, {
-        token: streamer1.token,
-      });
-      const beforeCount = beforeResponse.data.usageCount;
-
-      // Use template
-      await api(`/api/templates/${templateToUse.id}/use`, {
-        method: 'POST',
-        token: streamer1.token,
-        body: { episodeName: 'Usage Count Test ' + randomString() },
-      });
-
-      // Get template after use
-      const afterResponse = await api(`/api/templates/${templateToUse.id}`, {
-        token: streamer1.token,
-      });
-
-      expect(afterResponse.data.usageCount).toBe(beforeCount + 1);
+      expect(response.success).toBe(false);
     });
   });
 

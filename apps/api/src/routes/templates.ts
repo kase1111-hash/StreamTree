@@ -5,71 +5,6 @@ import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
 
 const router = Router();
 
-// Template categories
-const CATEGORIES = ['general', 'gaming', 'irl', 'music', 'sports', 'educational', 'charity'];
-
-// Get public templates (browse)
-router.get('/browse', async (req: AuthenticatedRequest, res, next) => {
-  try {
-    const { category, search, sort = 'popular' } = req.query;
-
-    const where: any = {
-      isPublic: true,
-    };
-
-    if (category && CATEGORIES.includes(category as string)) {
-      where.category = category;
-    }
-
-    if (search && typeof search === 'string') {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-      ];
-    }
-
-    let orderBy: any = { usageCount: 'desc' };
-    if (sort === 'newest') {
-      orderBy = { createdAt: 'desc' };
-    } else if (sort === 'name') {
-      orderBy = { name: 'asc' };
-    }
-
-    const templates = await prisma.template.findMany({
-      where,
-      orderBy,
-      take: 50,
-      include: {
-        creator: {
-          select: { id: true, username: true, displayName: true },
-        },
-      },
-    });
-
-    res.json({
-      success: true,
-      data: templates.map((t: typeof templates[number]) => ({
-        id: t.id,
-        name: t.name,
-        description: t.description,
-        category: t.category,
-        gridSize: t.gridSize,
-        eventCount: (t.events as unknown[]).length,
-        usageCount: t.usageCount,
-        createdAt: t.createdAt,
-        creator: {
-          id: t.creator.id,
-          username: t.creator.username,
-          displayName: t.creator.displayName,
-        },
-      })),
-      categories: CATEGORIES,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
 // Get user's templates
 router.get('/my', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
   try {
@@ -88,23 +23,17 @@ router.get('/my', requireStreamer, async (req: AuthenticatedRequest, res, next) 
 });
 
 // Get single template
-router.get('/:id', async (req: AuthenticatedRequest, res, next) => {
+router.get('/:id', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
   try {
     const template = await prisma.template.findUnique({
       where: { id: req.params.id },
-      include: {
-        creator: {
-          select: { id: true, username: true, displayName: true },
-        },
-      },
     });
 
     if (!template) {
       throw new AppError('Template not found', 404, 'NOT_FOUND');
     }
 
-    // If not public, only creator can view
-    if (!template.isPublic && template.creatorId !== req.user?.id) {
+    if (template.creatorId !== req.user!.id) {
       throw new AppError('Template not found', 404, 'NOT_FOUND');
     }
 
@@ -120,7 +49,7 @@ router.get('/:id', async (req: AuthenticatedRequest, res, next) => {
 // Create a template
 router.post('/', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
   try {
-    const { name, description, category, events, gridSize, isPublic } = req.body;
+    const { name, description, events, gridSize } = req.body;
 
     if (!name || typeof name !== 'string' || name.length < 3) {
       throw new AppError('Template name must be at least 3 characters', 400, 'VALIDATION_ERROR');
@@ -130,7 +59,6 @@ router.post('/', requireStreamer, async (req: AuthenticatedRequest, res, next) =
       throw new AppError('Template must have at least one event', 400, 'VALIDATION_ERROR');
     }
 
-    // Validate events
     for (const event of events) {
       if (!event.name || typeof event.name !== 'string') {
         throw new AppError('Each event must have a name', 400, 'VALIDATION_ERROR');
@@ -142,10 +70,8 @@ router.post('/', requireStreamer, async (req: AuthenticatedRequest, res, next) =
         creatorId: req.user!.id,
         name,
         description: description || null,
-        category: category && CATEGORIES.includes(category) ? category : 'general',
         events,
         gridSize: gridSize || 5,
-        isPublic: isPublic || false,
       },
     });
 
@@ -173,7 +99,7 @@ router.patch('/:id', requireStreamer, async (req: AuthenticatedRequest, res, nex
       throw new AppError('Not authorized', 403, 'FORBIDDEN');
     }
 
-    const { name, description, category, events, gridSize, isPublic } = req.body;
+    const { name, description, events, gridSize } = req.body;
     const updateData: any = {};
 
     if (name !== undefined) {
@@ -187,10 +113,6 @@ router.patch('/:id', requireStreamer, async (req: AuthenticatedRequest, res, nex
       updateData.description = description || null;
     }
 
-    if (category !== undefined && CATEGORIES.includes(category)) {
-      updateData.category = category;
-    }
-
     if (events !== undefined) {
       if (!Array.isArray(events) || events.length === 0) {
         throw new AppError('Template must have at least one event', 400, 'VALIDATION_ERROR');
@@ -200,10 +122,6 @@ router.patch('/:id', requireStreamer, async (req: AuthenticatedRequest, res, nex
 
     if (gridSize !== undefined) {
       updateData.gridSize = gridSize;
-    }
-
-    if (isPublic !== undefined) {
-      updateData.isPublic = isPublic;
     }
 
     const updated = await prisma.template.update({
@@ -248,7 +166,7 @@ router.delete('/:id', requireStreamer, async (req: AuthenticatedRequest, res, ne
   }
 });
 
-// Create episode from template
+// Create episode from template (own templates only)
 router.post('/:id/use', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
   try {
     const { episodeName, cardPrice, maxCards } = req.body;
@@ -261,15 +179,12 @@ router.post('/:id/use', requireStreamer, async (req: AuthenticatedRequest, res, 
       throw new AppError('Template not found', 404, 'NOT_FOUND');
     }
 
-    // Check if template is public or belongs to user
-    if (!template.isPublic && template.creatorId !== req.user!.id) {
+    if (template.creatorId !== req.user!.id) {
       throw new AppError('Template not found', 404, 'NOT_FOUND');
     }
 
-    // Generate share code
     const shareCode = generateShareCode();
 
-    // Create episode with events from template
     const episode = await prisma.episode.create({
       data: {
         streamerId: req.user!.id,
@@ -296,14 +211,6 @@ router.post('/:id/use', requireStreamer, async (req: AuthenticatedRequest, res, 
       },
     });
 
-    // Increment template usage
-    await prisma.template.update({
-      where: { id: template.id },
-      data: {
-        usageCount: { increment: 1 },
-      },
-    });
-
     res.status(201).json({
       success: true,
       data: episode,
@@ -316,7 +223,7 @@ router.post('/:id/use', requireStreamer, async (req: AuthenticatedRequest, res, 
 // Save episode as template
 router.post('/from-episode/:episodeId', requireStreamer, async (req: AuthenticatedRequest, res, next) => {
   try {
-    const { name, description, category, isPublic } = req.body;
+    const { name, description } = req.body;
 
     const episode = await prisma.episode.findUnique({
       where: { id: req.params.episodeId },
@@ -339,7 +246,6 @@ router.post('/from-episode/:episodeId', requireStreamer, async (req: Authenticat
       throw new AppError('Template name must be at least 3 characters', 400, 'VALIDATION_ERROR');
     }
 
-    // Convert events to template format
     type EventDef = typeof episode.eventDefinitions[number];
     const events = episode.eventDefinitions.map((e: EventDef) => ({
       name: e.name,
@@ -354,10 +260,8 @@ router.post('/from-episode/:episodeId', requireStreamer, async (req: Authenticat
         creatorId: req.user!.id,
         name,
         description: description || null,
-        category: category && CATEGORIES.includes(category) ? category : 'general',
         events,
         gridSize: episode.gridSize,
-        isPublic: isPublic || false,
       },
     });
 

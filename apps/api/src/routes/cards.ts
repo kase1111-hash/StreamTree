@@ -3,12 +3,13 @@ import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
 import { generateCardGrid } from '@streamtree/shared';
-import { broadcastToEpisode, broadcastStats } from '../websocket/server.js';
+import { broadcastToEpisode, broadcastStats, sendToUser } from '../websocket/server.js';
 import {
   isBlockchainConfigured,
   mintBranchToken,
   generateMetadataUri,
 } from '../services/blockchain.service.js';
+import { createPaymentIntent } from '../services/stripe.service.js';
 import { sanitizeError } from '../utils/sanitize.js';
 
 const router = Router();
@@ -170,9 +171,13 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
       throw new AppError('Already have a card for this episode', 400, 'DUPLICATE');
     }
 
-    // For Phase 1, only free cards
+    // Paid cards require payment flow
     if (episode.cardPrice > 0) {
-      throw new AppError('Paid cards not yet supported', 501, 'NOT_IMPLEMENTED');
+      throw new AppError(
+        'This episode requires payment. Use POST /api/cards/mint/:episodeId/payment to initiate payment.',
+        402,
+        'PAYMENT_REQUIRED'
+      );
     }
 
     // Generate the card grid
@@ -287,6 +292,93 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
       data: {
         ...card,
         branchTokenId,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Create payment intent for a paid card
+router.post('/mint/:episodeId/payment', async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const episode = await prisma.episode.findUnique({
+      where: { id: req.params.episodeId },
+    });
+
+    if (!episode) {
+      throw new AppError('Episode not found', 404, 'NOT_FOUND');
+    }
+
+    if (episode.status !== 'live') {
+      throw new AppError('Episode is not accepting cards', 400, 'INVALID_STATUS');
+    }
+
+    if (episode.cardPrice <= 0) {
+      throw new AppError('This episode is free. Use POST /api/cards/mint/:episodeId instead.', 400, 'FREE_EPISODE');
+    }
+
+    if (episode.maxCards && episode.cardsMinted >= episode.maxCards) {
+      throw new AppError('Episode is sold out', 400, 'SOLD_OUT');
+    }
+
+    // Check if user already has a card
+    const existingCard = await prisma.card.findUnique({
+      where: {
+        episodeId_holderId: {
+          episodeId: episode.id,
+          holderId: req.user!.id,
+        },
+      },
+    });
+
+    if (existingCard) {
+      throw new AppError('Already have a card for this episode', 400, 'DUPLICATE');
+    }
+
+    // Check for an existing pending payment
+    const existingPending = await prisma.pendingPayment.findFirst({
+      where: {
+        episodeId: episode.id,
+        userId: req.user!.id,
+        status: 'pending',
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    if (existingPending) {
+      throw new AppError(
+        'A payment is already in progress for this episode',
+        409,
+        'PAYMENT_IN_PROGRESS'
+      );
+    }
+
+    // Create payment intent
+    const { clientSecret, paymentIntentId } = await createPaymentIntent({
+      amount: episode.cardPrice,
+      episodeId: episode.id,
+      userId: req.user!.id,
+    });
+
+    // Track the pending payment (expires in 30 minutes)
+    await prisma.pendingPayment.create({
+      data: {
+        episodeId: episode.id,
+        userId: req.user!.id,
+        paymentIntentId,
+        amount: episode.cardPrice,
+        status: 'pending',
+        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        clientSecret,
+        paymentIntentId,
+        amount: episode.cardPrice,
       },
     });
   } catch (error) {

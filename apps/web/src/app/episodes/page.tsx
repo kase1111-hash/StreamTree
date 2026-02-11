@@ -16,16 +16,6 @@ interface Episode {
   endedAt: string | null;
 }
 
-const CATEGORY_OPTIONS = [
-  { value: 'general', label: 'General' },
-  { value: 'gaming', label: 'Gaming' },
-  { value: 'irl', label: 'IRL' },
-  { value: 'music', label: 'Music' },
-  { value: 'sports', label: 'Sports' },
-  { value: 'educational', label: 'Educational' },
-  { value: 'charity', label: 'Charity' },
-];
-
 export default function EpisodesPage() {
   const { user, token } = useAuth();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -36,8 +26,6 @@ export default function EpisodesPage() {
   const [savingEpisodeId, setSavingEpisodeId] = useState<string | null>(null);
   const [templateName, setTemplateName] = useState('');
   const [templateDescription, setTemplateDescription] = useState('');
-  const [templateCategory, setTemplateCategory] = useState('general');
-  const [templateIsPublic, setTemplateIsPublic] = useState(false);
   const [savingTemplate, setSavingTemplate] = useState(false);
 
   useEffect(() => {
@@ -62,8 +50,6 @@ export default function EpisodesPage() {
     setSavingEpisodeId(episode.id);
     setTemplateName(episode.name + ' Template');
     setTemplateDescription('');
-    setTemplateCategory('general');
-    setTemplateIsPublic(false);
   };
 
   const handleSaveAsTemplate = async () => {
@@ -76,8 +62,6 @@ export default function EpisodesPage() {
         {
           name: templateName.trim(),
           description: templateDescription || undefined,
-          category: templateCategory,
-          isPublic: templateIsPublic,
         },
         token
       );
@@ -253,33 +237,6 @@ export default function EpisodesPage() {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-1">Category</label>
-                <select
-                  value={templateCategory}
-                  onChange={(e) => setTemplateCategory(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 dark:bg-gray-800"
-                >
-                  {CATEGORY_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={templateIsPublic}
-                  onChange={(e) => setTemplateIsPublic(e.target.checked)}
-                  className="w-4 h-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                />
-                <span className="text-sm">Make this template public</span>
-              </label>
-              <p className="text-xs text-gray-500 ml-6">
-                Public templates can be used by other streamers
-              </p>
             </div>
 
             <div className="flex gap-3 mt-6">

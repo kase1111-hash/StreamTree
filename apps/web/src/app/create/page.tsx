@@ -18,7 +18,6 @@ interface Template {
   id: string;
   name: string;
   description: string | null;
-  category: string;
   events: any[];
   gridSize: number;
 }
@@ -74,8 +73,9 @@ function CreateEpisodeContent() {
   }, [templateId, token]);
 
   const loadTemplate = async (id: string) => {
+    if (!token) return;
     try {
-      const template = await templatesApi.get(id, token || undefined);
+      const template = await templatesApi.get(id, token);
       setSelectedTemplate(template);
       setName(template.name);
       setGridSize(template.gridSize);
@@ -85,9 +85,10 @@ function CreateEpisodeContent() {
   };
 
   const fetchTemplates = async () => {
+    if (!token) return;
     setLoadingTemplates(true);
     try {
-      const data = await templatesApi.browse() as any;
+      const data = await templatesApi.getMy(token);
       setTemplates(data);
     } catch (err) {
       console.error('Failed to load templates:', err);
@@ -282,15 +283,7 @@ function CreateEpisodeContent() {
 
           {/* Template Selection */}
           <div className="bg-white dark:bg-gray-900 p-6 rounded-xl shadow-lg mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold">Start from Template</h2>
-              <Link
-                href="/templates"
-                className="text-sm text-primary-600 hover:underline"
-              >
-                Browse all
-              </Link>
-            </div>
+            <h2 className="text-lg font-semibold mb-4">Start from Template</h2>
 
             {selectedTemplate ? (
               <div className="p-4 bg-primary-50 dark:bg-primary-900/20 border border-primary-200 dark:border-primary-800 rounded-lg">
@@ -450,13 +443,8 @@ function CreateEpisodeContent() {
                 </div>
               ) : templates.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
-                  <p>No templates available</p>
-                  <Link
-                    href="/templates"
-                    className="text-primary-600 hover:underline mt-2 inline-block"
-                  >
-                    Browse template gallery
-                  </Link>
+                  <p>No saved templates yet</p>
+                  <p className="text-sm mt-1">Save an ended episode as a template to reuse it here</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
