@@ -73,7 +73,7 @@ export function addFreeCenter(grid: GridSquare[][]): GridSquare[][] {
   }
 
   const center = Math.floor(size / 2);
-  const result = grid.map((row) => [...row]);
+  const result = grid.map((row) => row.map((square) => ({ ...square })));
 
   result[center][center] = {
     eventId: 'FREE',

@@ -5,6 +5,7 @@ import { v4 as uuid } from 'uuid';
 import cookie from 'cookie';
 import { prisma } from '../db/client.js';
 import type { ClientToServerEvent, ServerToClientEvent, Pattern } from '@streamtree/shared';
+import { calculatePatternScore } from '@streamtree/shared';
 import { sanitizeError } from '../utils/sanitize.js';
 
 interface AuthenticatedWebSocket extends WebSocket {
@@ -172,7 +173,11 @@ function joinEpisode(client: AuthenticatedWebSocket, episodeId: string) {
 
 function leaveEpisode(client: AuthenticatedWebSocket, episodeId: string) {
   client.subscribedEpisodes.delete(episodeId);
-  episodeSubscribers.get(episodeId)?.delete(client.id);
+  const subs = episodeSubscribers.get(episodeId);
+  if (subs) {
+    subs.delete(client.id);
+    if (subs.size === 0) episodeSubscribers.delete(episodeId);
+  }
 }
 
 function subscribeToCard(client: AuthenticatedWebSocket, cardId: string) {
@@ -186,7 +191,11 @@ function subscribeToCard(client: AuthenticatedWebSocket, cardId: string) {
 
 function unsubscribeFromCard(client: AuthenticatedWebSocket, cardId: string) {
   client.subscribedCards.delete(cardId);
-  cardSubscribers.get(cardId)?.delete(client.id);
+  const subs = cardSubscribers.get(cardId);
+  if (subs) {
+    subs.delete(client.id);
+    if (subs.size === 0) cardSubscribers.delete(cardId);
+  }
 }
 
 async function handleMarkSquare(
@@ -254,14 +263,22 @@ async function handleMarkSquare(
 }
 
 function cleanupConnection(client: AuthenticatedWebSocket) {
-  // Remove from episode subscriptions
+  // Remove from episode subscriptions and prune empty sets
   for (const episodeId of client.subscribedEpisodes) {
-    episodeSubscribers.get(episodeId)?.delete(client.id);
+    const subs = episodeSubscribers.get(episodeId);
+    if (subs) {
+      subs.delete(client.id);
+      if (subs.size === 0) episodeSubscribers.delete(episodeId);
+    }
   }
 
-  // Remove from card subscriptions
+  // Remove from card subscriptions and prune empty sets
   for (const cardId of client.subscribedCards) {
-    cardSubscribers.get(cardId)?.delete(client.id);
+    const subs = cardSubscribers.get(cardId);
+    if (subs) {
+      subs.delete(client.id);
+      if (subs.size === 0) cardSubscribers.delete(cardId);
+    }
   }
 
   connections.delete(client.id);
@@ -314,10 +331,8 @@ export async function broadcastStats(episodeId: string) {
 
     if (!episode) return;
 
-    const leaderboard = await prisma.card.findMany({
+    const leaderboardRaw = await prisma.card.findMany({
       where: { episodeId },
-      orderBy: { markedSquares: 'desc' },
-      take: 10,
       include: {
         holder: {
           select: { id: true, username: true, displayName: true },
@@ -325,18 +340,28 @@ export async function broadcastStats(episodeId: string) {
       },
     });
 
+    // Sort by pattern score (incorporating pattern bonuses), then by marked squares as tiebreaker
+    const leaderboard = leaderboardRaw
+      .map((card: typeof leaderboardRaw[number]) => ({
+        ...card,
+        score: calculatePatternScore(card.patterns as Pattern[]) + card.markedSquares,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+
     broadcastToEpisode(episodeId, {
       type: 'stats:update',
       episodeId,
       cardsMinted: episode.cardsMinted,
       revenue: episode.totalRevenue,
-      leaderboard: leaderboard.map((card: typeof leaderboard[number], index: number) => ({
+      leaderboard: leaderboard.map((card, index: number) => ({
         rank: index + 1,
         cardId: card.id,
         // SECURITY: Don't expose internal user IDs - use username for display only
         username: card.holder.displayName || card.holder.username,
         markedSquares: card.markedSquares,
         patterns: card.patterns as Pattern[],
+        score: card.score,
       })),
     });
   } catch (error) {

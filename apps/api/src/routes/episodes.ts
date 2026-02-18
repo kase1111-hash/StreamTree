@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
-import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice, detectPatterns } from '@streamtree/shared';
+import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice, detectPatterns, calculatePatternScore } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats } from '../websocket/server.js';
 import {
   isBlockchainConfigured,
@@ -460,14 +460,12 @@ router.get('/:id/stats', async (req: AuthenticatedRequest, res, next) => {
       throw new AppError('Not authorized', 403, 'FORBIDDEN');
     }
 
-    const [eventsTriggered, leaderboard] = await Promise.all([
+    const [eventsTriggered, leaderboardRaw] = await Promise.all([
       prisma.firedEvent.count({
         where: { episodeId: episode.id },
       }),
       prisma.card.findMany({
         where: { episodeId: episode.id },
-        orderBy: { markedSquares: 'desc' },
-        take: 10,
         include: {
           holder: {
             select: { id: true, username: true, displayName: true },
@@ -476,19 +474,29 @@ router.get('/:id/stats', async (req: AuthenticatedRequest, res, next) => {
       }),
     ]);
 
+    // Sort by pattern score (incorporating pattern bonuses), then by marked squares as tiebreaker
+    const leaderboard = leaderboardRaw
+      .map((card: typeof leaderboardRaw[number]) => ({
+        ...card,
+        score: calculatePatternScore(card.patterns as any[]) + card.markedSquares,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+
     res.json({
       success: true,
       data: {
         cardsMinted: episode.cardsMinted,
         totalRevenue: episode.totalRevenue,
         eventsTriggered,
-        leaderboard: leaderboard.map((card: typeof leaderboard[number], index: number) => ({
+        leaderboard: leaderboard.map((card, index: number) => ({
           rank: index + 1,
           cardId: card.id,
           // SECURITY: Don't expose internal user IDs - use username for display only
           username: card.holder.displayName || card.holder.username,
           markedSquares: card.markedSquares,
           patterns: card.patterns,
+          score: card.score,
         })),
       },
     });
@@ -520,16 +528,23 @@ router.get('/:id/results', async (req: AuthenticatedRequest, res, next) => {
       throw new AppError('Episode not available', 404, 'NOT_FOUND');
     }
 
-    const leaderboard = await prisma.card.findMany({
+    const leaderboardRaw = await prisma.card.findMany({
       where: { episodeId: episode.id },
-      orderBy: { markedSquares: 'desc' },
-      take: 50,
       include: {
         holder: {
           select: { id: true, username: true, displayName: true },
         },
       },
     });
+
+    // Sort by pattern score (incorporating pattern bonuses), then by marked squares as tiebreaker
+    const leaderboard = leaderboardRaw
+      .map((card: typeof leaderboardRaw[number]) => ({
+        ...card,
+        score: calculatePatternScore(card.patterns as any[]) + card.markedSquares,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 50);
 
     res.json({
       success: true,
@@ -545,13 +560,14 @@ router.get('/:id/results', async (req: AuthenticatedRequest, res, next) => {
         streamer: episode.streamer,
         eventsFired: episode.firedEvents.length,
         totalEvents: episode.eventDefinitions.length,
-        leaderboard: leaderboard.map((card: typeof leaderboard[number], index: number) => ({
+        leaderboard: leaderboard.map((card, index: number) => ({
           rank: index + 1,
           cardId: card.id,
           // SECURITY: Don't expose internal user IDs - use username for display only
           username: card.holder.displayName || card.holder.username,
           markedSquares: card.markedSquares,
           patterns: card.patterns,
+          score: card.score,
         })),
       },
     });
@@ -733,16 +749,9 @@ router.post('/:id/events/:eventId/fire', requireStreamer, async (req: Authentica
       throw new AppError('Event not found', 404, 'NOT_FOUND');
     }
 
-    // Security: Only allow manual firing of events with triggerType 'manual'
-    // Events with other trigger types (e.g., 'twitch', 'chat') should only
-    // be fired through their designated automated channels
-    if (event.triggerType !== 'manual') {
-      throw new AppError(
-        'This event cannot be manually fired',
-        403,
-        'FORBIDDEN'
-      );
-    }
+    // Allow manual firing by the episode owner as a fallback for any trigger type.
+    // Streamers need the ability to manually fire twitch-triggered events when
+    // the automated channel is down or when they want to override.
 
     // Get all cards for this episode
     const cards = await prisma.card.findMany({
