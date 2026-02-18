@@ -56,6 +56,10 @@ export function validateCardPrice(price: number): { valid: boolean; error?: stri
   if (!Number.isInteger(price)) {
     return { valid: false, error: 'Price must be in cents (whole number)' };
   }
+  // Price must be 0 (free) or at least 50 cents (Stripe minimum)
+  if (price > 0 && price < 50) {
+    return { valid: false, error: 'Paid cards must cost at least $0.50 (50 cents)' };
+  }
   if (price > 100000) {
     // $1000 max
     return { valid: false, error: 'Price cannot exceed $1000' };

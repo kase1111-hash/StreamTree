@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
-import { generateCardGrid } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats, sendToUser } from '../websocket/server.js';
 import {
   isBlockchainConfigured,
@@ -11,6 +10,7 @@ import {
 } from '../services/blockchain.service.js';
 import { createPaymentIntent } from '../services/stripe.service.js';
 import { sanitizeError } from '../utils/sanitize.js';
+import { mintCardAtomically, MintError } from '../services/card-mint.service.js';
 
 const router = Router();
 
@@ -129,50 +129,19 @@ router.get('/:id', async (req: AuthenticatedRequest, res, next) => {
 // Mint a card for an episode
 router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => {
   try {
-    const episodeBase = await prisma.episode.findUnique({
-      where: { id: req.params.episodeId },
-      include: {
-        eventDefinitions: {
-          orderBy: { sortOrder: 'asc' },
-        },
-      },
+    const episodeId = req.params.episodeId;
+
+    // Quick pre-check: reject paid episodes before entering the transaction
+    const episodePreCheck = await prisma.episode.findUnique({
+      where: { id: episodeId },
+      select: { cardPrice: true, rootTokenId: true, gridSize: true },
     });
-    const episode = episodeBase as (typeof episodeBase & { rootTokenId?: string | null }) | null;
 
-    // Fetch rootTokenId separately for blockchain integration
-    const episodeWithRoot = episode ? await prisma.episode.findUnique({
-      where: { id: episode.id },
-      select: { rootTokenId: true },
-    }) : null;
-
-    if (!episode) {
+    if (!episodePreCheck) {
       throw new AppError('Episode not found', 404, 'NOT_FOUND');
     }
 
-    if (episode.status !== 'live') {
-      throw new AppError('Episode is not accepting cards', 400, 'INVALID_STATUS');
-    }
-
-    if (episode.maxCards && episode.cardsMinted >= episode.maxCards) {
-      throw new AppError('Episode is sold out', 400, 'SOLD_OUT');
-    }
-
-    // Check if user already has a card
-    const existingCard = await prisma.card.findUnique({
-      where: {
-        episodeId_holderId: {
-          episodeId: episode.id,
-          holderId: req.user!.id,
-        },
-      },
-    });
-
-    if (existingCard) {
-      throw new AppError('Already have a card for this episode', 400, 'DUPLICATE');
-    }
-
-    // Paid cards require payment flow
-    if (episode.cardPrice > 0) {
+    if (episodePreCheck.cardPrice > 0) {
       throw new AppError(
         'This episode requires payment. Use POST /api/cards/mint/:episodeId/payment to initiate payment.',
         402,
@@ -180,50 +149,25 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
       );
     }
 
-    // Generate the card grid
-    type EventDef = typeof episode.eventDefinitions[number];
-    const grid = generateCardGrid(
-      episode.eventDefinitions.map((e: EventDef) => ({
-        id: e.id,
-        episodeId: e.episodeId,
-        name: e.name,
-        icon: e.icon,
-        description: e.description,
-        triggerType: e.triggerType as 'manual' | 'twitch' | 'custom',
-        triggerConfig: e.triggerConfig as Record<string, unknown> | null,
-        firedAt: e.firedAt,
-        firedCount: e.firedCount,
-        createdAt: e.createdAt,
-        order: e.sortOrder,
-      })),
-      episode.gridSize
-    );
-
-    // Mark any already-fired events
-    const firedEventIds = episode.eventDefinitions
-      .filter((e: EventDef) => e.firedAt !== null)
-      .map((e: EventDef) => e.id);
-
-    let markedCount = 0;
-    for (let row = 0; row < grid.length; row++) {
-      for (let col = 0; col < grid[row].length; col++) {
-        if (firedEventIds.includes(grid[row][col].eventId)) {
-          grid[row][col].marked = true;
-          grid[row][col].markedAt = new Date();
-          markedCount++;
-        }
+    // Atomically mint the card (serializable transaction prevents race conditions)
+    let mintResult;
+    try {
+      mintResult = await mintCardAtomically({
+        episodeId,
+        holderId: req.user!.id,
+      });
+    } catch (error) {
+      if (error instanceof MintError) {
+        throw new AppError(error.message, error.statusCode, error.code);
       }
+      throw error;
     }
 
-    // Create the card
-    const card = await prisma.card.create({
-      data: {
-        episodeId: episode.id,
-        holderId: req.user!.id,
-        grid: grid as any,
-        markedSquares: markedCount,
-        cardNumber: episode.cardsMinted + 1,
-      },
+    const { card, cardNumber } = mintResult;
+
+    // Fetch full card with episode include for response (outside transaction)
+    const fullCard = await prisma.card.findUnique({
+      where: { id: card.id },
       include: {
         episode: {
           select: {
@@ -237,24 +181,24 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
       },
     });
 
-    // Mint branch token on blockchain if configured
+    // Mint branch token on blockchain if configured (outside transaction)
     let branchTokenId: string | null = null;
 
     if (
       isBlockchainConfigured() &&
-      episodeWithRoot?.rootTokenId &&
+      episodePreCheck.rootTokenId &&
       req.user!.walletAddress
     ) {
       try {
         const metadataUri = generateMetadataUri('branch', card.id, {
           cardId: card.id,
-          episodeId: episode.id,
-          cardNumber: card.cardNumber,
-          gridSize: episode.gridSize,
+          episodeId,
+          cardNumber,
+          gridSize: episodePreCheck.gridSize,
         });
 
         const result = await mintBranchToken(
-          episodeWithRoot.rootTokenId,
+          episodePreCheck.rootTokenId,
           req.user!.walletAddress,
           card.id,
           metadataUri
@@ -264,7 +208,6 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
           branchTokenId = result.tokenId;
           console.log('Branch token minted:', branchTokenId, 'tx:', result.transactionHash);
 
-          // Update card with branch token ID
           await prisma.card.update({
             where: { id: card.id },
             data: { branchTokenId },
@@ -272,25 +215,16 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
         }
       } catch (error) {
         console.error('Failed to mint branch token, continuing without blockchain:', sanitizeError(error));
-        // Continue without blockchain - don't block the card creation
       }
     }
 
-    // Update episode stats
-    await prisma.episode.update({
-      where: { id: episode.id },
-      data: {
-        cardsMinted: { increment: 1 },
-      },
-    });
-
     // Broadcast stats update
-    broadcastStats(episode.id);
+    broadcastStats(episodeId);
 
     res.status(201).json({
       success: true,
       data: {
-        ...card,
+        ...fullCard,
         branchTokenId,
       },
     });

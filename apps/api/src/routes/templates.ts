@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
+import { generateShareCode } from '@streamtree/shared';
 
 const router = Router();
 
@@ -183,7 +184,10 @@ router.post('/:id/use', requireStreamer, async (req: AuthenticatedRequest, res, 
       throw new AppError('Template not found', 404, 'NOT_FOUND');
     }
 
-    const shareCode = generateShareCode();
+    let shareCode = generateShareCode();
+    while (await prisma.episode.findUnique({ where: { shareCode } })) {
+      shareCode = generateShareCode();
+    }
 
     const episode = await prisma.episode.create({
       data: {
@@ -273,14 +277,5 @@ router.post('/from-episode/:episodeId', requireStreamer, async (req: Authenticat
     next(error);
   }
 });
-
-function generateShareCode(): string {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
 
 export { router as templatesRouter };

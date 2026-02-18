@@ -111,16 +111,20 @@ function verifyWalletSignature(message: string, signature: string, expectedAddre
     }
 
     // Extract and validate timestamp from message to prevent replay attacks
+    // Timestamp is REQUIRED to prevent indefinite signature replay
     const timestampMatch = message.match(/Timestamp: (\d+)/);
-    if (timestampMatch) {
-      const timestamp = parseInt(timestampMatch[1], 10);
-      const now = Date.now();
-      const fiveMinutes = 5 * 60 * 1000;
+    if (!timestampMatch) {
+      console.warn('Auth message missing required timestamp - rejecting to prevent replay attacks');
+      return false;
+    }
 
-      if (Math.abs(now - timestamp) > fiveMinutes) {
-        console.warn('Auth message timestamp expired');
-        return false;
-      }
+    const timestamp = parseInt(timestampMatch[1], 10);
+    const now = Date.now();
+    const fiveMinutes = 5 * 60 * 1000;
+
+    if (Math.abs(now - timestamp) > fiveMinutes) {
+      console.warn('Auth message timestamp expired');
+      return false;
     }
 
     // Recover the address from the signature

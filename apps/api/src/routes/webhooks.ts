@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import Stripe from 'stripe';
 import { prisma } from '../db/client.js';
 import { stripe, createRefund } from '../services/stripe.service.js';
-import { generateCardGrid, detectPatterns } from '@streamtree/shared';
+import { detectPatterns } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats, sendToUser } from '../websocket/server.js';
 import {
   verifyWebhookSignature,
@@ -11,6 +11,7 @@ import {
   getEventDisplayInfo,
 } from '../services/twitch.service.js';
 import { sanitizeError } from '../utils/sanitize.js';
+import { mintCardAtomically, MintError } from '../services/card-mint.service.js';
 
 const router = Router();
 
@@ -82,123 +83,64 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     return;
   }
 
-  // Get episode
-  const episode = await prisma.episode.findUnique({
-    where: { id: episodeId },
-    include: { eventDefinitions: true },
-  });
-
-  if (!episode) {
-    console.error('Episode not found for payment:', episodeId);
-    return;
-  }
-
-  if (episode.status !== 'live') {
-    console.error('Episode not live, cannot create card. Initiating refund...');
-
-    try {
-      const refundResult = await createRefund(paymentIntent.id, 'requested_by_customer');
-      console.log(`Refund initiated for non-live episode. Refund ID: ${refundResult.refundId}, Status: ${refundResult.status}`);
-
-      sendToUser(userId, {
-        type: 'payment:refunded',
-        reason: 'episode_not_live',
-        message: 'This episode is no longer accepting cards. Your payment has been refunded.',
-        refundId: refundResult.refundId,
-        episodeId,
-      });
-    } catch (refundError) {
-      console.error('Failed to refund non-live episode payment:', refundError);
-      console.error(`MANUAL_REFUND_REQUIRED: PaymentIntent ${paymentIntent.id} for episode ${episodeId} needs manual refund`);
-    }
-
-    return;
-  }
-
-  // Check max cards - if sold out, refund the payment
-  if (episode.maxCards && episode.cardsMinted >= episode.maxCards) {
-    console.error('Episode sold out, cannot create card. Initiating refund...');
-
-    try {
-      const refundResult = await createRefund(paymentIntent.id, 'episode_sold_out');
-      console.log(`Refund initiated for sold-out episode. Refund ID: ${refundResult.refundId}, Status: ${refundResult.status}`);
-
-      // Notify the user about the refund
-      sendToUser(userId, {
-        type: 'payment:refunded',
-        reason: 'episode_sold_out',
-        message: 'This episode is sold out. Your payment has been refunded.',
-        refundId: refundResult.refundId,
-        episodeId,
-      });
-    } catch (refundError) {
-      console.error('Failed to refund sold-out episode payment:', refundError);
-      // Log for manual intervention
-      console.error(`MANUAL_REFUND_REQUIRED: PaymentIntent ${paymentIntent.id} for episode ${episodeId} needs manual refund`);
-    }
-
-    return;
-  }
-
-  // Generate card grid with full event definition mapping
-  type EventDef = typeof episode.eventDefinitions[number];
-  const grid = generateCardGrid(
-    episode.eventDefinitions.map((e: EventDef) => ({
-      id: e.id,
-      episodeId: e.episodeId,
-      name: e.name,
-      icon: e.icon,
-      description: e.description,
-      triggerType: e.triggerType as 'manual' | 'twitch' | 'custom',
-      triggerConfig: e.triggerConfig as Record<string, unknown> | null,
-      firedAt: e.firedAt,
-      firedCount: e.firedCount,
-      createdAt: e.createdAt,
-      order: e.sortOrder,
-    })),
-    episode.gridSize
-  );
-
-  // Mark any already-fired events on the new card
-  const firedEventIds = episode.eventDefinitions
-    .filter((e: EventDef) => e.firedAt !== null)
-    .map((e: EventDef) => e.id);
-
-  let markedCount = 0;
-  for (let row = 0; row < grid.length; row++) {
-    for (let col = 0; col < grid[row].length; col++) {
-      if (firedEventIds.includes(grid[row][col].eventId)) {
-        grid[row][col].marked = true;
-        grid[row][col].markedAt = new Date();
-        markedCount++;
-      }
-    }
-  }
-
-  // Get next card number
-  const cardNumber = episode.cardsMinted + 1;
-
-  // Create the card
-  const card = await prisma.card.create({
-    data: {
+  // Atomically mint the card (serializable transaction prevents race conditions)
+  let mintResult;
+  try {
+    mintResult = await mintCardAtomically({
       episodeId,
       holderId: userId,
-      grid: grid as any,
-      markedSquares: markedCount,
       paymentId: paymentIntent.id,
       pricePaid: paymentIntent.amount,
-      cardNumber,
-    },
-  });
+    });
+  } catch (error) {
+    if (error instanceof MintError) {
+      // Map specific mint failures to refund actions
+      if (error.code === 'INVALID_STATUS' || error.code === 'SOLD_OUT') {
+        const reason = error.code === 'INVALID_STATUS'
+          ? 'requested_by_customer'
+          : 'episode_sold_out';
+        const userReason = error.code === 'INVALID_STATUS'
+          ? 'episode_not_live'
+          : 'episode_sold_out';
+        const userMessage = error.code === 'INVALID_STATUS'
+          ? 'This episode is no longer accepting cards. Your payment has been refunded.'
+          : 'This episode is sold out. Your payment has been refunded.';
 
-  // Update episode stats
-  await prisma.episode.update({
-    where: { id: episodeId },
-    data: {
-      cardsMinted: { increment: 1 },
-      totalRevenue: { increment: paymentIntent.amount },
-    },
-  });
+        console.error(`Cannot mint card (${error.code}). Initiating refund...`);
+
+        try {
+          const refundResult = await createRefund(paymentIntent.id, reason);
+          console.log(`Refund initiated. Refund ID: ${refundResult.refundId}, Status: ${refundResult.status}`);
+
+          sendToUser(userId, {
+            type: 'payment:refunded',
+            reason: userReason,
+            message: userMessage,
+            refundId: refundResult.refundId,
+            episodeId,
+          });
+        } catch (refundError) {
+          console.error('Failed to refund payment:', refundError);
+          console.error(`MANUAL_REFUND_REQUIRED: PaymentIntent ${paymentIntent.id} for episode ${episodeId} needs manual refund`);
+        }
+
+        return;
+      }
+
+      if (error.code === 'NOT_FOUND') {
+        console.error('Episode not found for payment:', episodeId);
+        return;
+      }
+
+      if (error.code === 'DUPLICATE') {
+        console.log('User already has a card for this episode, skipping');
+        return;
+      }
+    }
+    throw error;
+  }
+
+  const { card, cardNumber } = mintResult;
 
   // Mark pending payment as completed
   await prisma.pendingPayment.updateMany({

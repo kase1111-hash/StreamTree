@@ -1,8 +1,10 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
 import { sanitizeError } from '../utils/sanitize.js';
+import { withSerializableRetry } from '../utils/transaction.js';
 import {
   stripe,
   createConnectedAccount,
@@ -200,7 +202,7 @@ router.post('/withdraw/:episodeId', requireStreamer, async (req: AuthenticatedRe
 
     const { episodeId } = req.params;
 
-    // Get user with Stripe info
+    // Pre-check: validate user Stripe setup (outside transaction — doesn't need serialization)
     const user = await prisma.user.findUnique({
       where: { id: req.user!.id },
     });
@@ -221,67 +223,88 @@ router.post('/withdraw/:episodeId', requireStreamer, async (req: AuthenticatedRe
       );
     }
 
-    // Get episode
-    const episode = await prisma.episode.findUnique({
-      where: { id: episodeId },
-      include: {
-        withdrawals: true,
-      },
-    });
+    // Atomically calculate availability and create withdrawal record
+    // Uses SELECT ... FOR UPDATE to serialize concurrent withdrawal attempts
+    const { withdrawal, available } = await withSerializableRetry<{ withdrawal: any; available: number }>(() =>
+      prisma.$transaction(
+        async (txRaw) => {
+          // Cast to any — Prisma 5.9's TS types don't expose $queryRaw/models
+          // on the interactive transaction client, but they are available at runtime
+          const tx = txRaw as any;
+          // Lock the episode row to prevent concurrent withdrawals
+          const episodes: any[] = await tx.$queryRaw`
+            SELECT * FROM episodes
+            WHERE id = ${episodeId}
+            AND streamer_id = ${req.user!.id}
+            FOR UPDATE
+          `;
+          const ep = episodes[0];
 
-    if (!episode) {
-      throw new AppError('Episode not found', 404, 'NOT_FOUND');
-    }
+          if (!ep) {
+            // Could be not found or not owned by this user
+            const exists = await tx.episode.findUnique({
+              where: { id: episodeId },
+              select: { id: true },
+            });
+            if (!exists) {
+              throw new AppError('Episode not found', 404, 'NOT_FOUND');
+            }
+            throw new AppError('Not authorized', 403, 'FORBIDDEN');
+          }
 
-    if (episode.streamerId !== req.user!.id) {
-      throw new AppError('Not authorized', 403, 'FORBIDDEN');
-    }
+          if (ep.status !== 'ended') {
+            throw new AppError('Episode must be ended before withdrawal', 400, 'INVALID_STATUS');
+          }
 
-    if (episode.status !== 'ended') {
-      throw new AppError('Episode must be ended before withdrawal', 400, 'INVALID_STATUS');
-    }
+          // Get withdrawals within the transaction (consistent snapshot)
+          const withdrawals = await tx.withdrawal.findMany({
+            where: { episodeId },
+          });
 
-    // Calculate available amount
-    type WithdrawalRecord = { status: string; netAmount: number };
-    const completedWithdrawals = episode.withdrawals
-      .filter((w: WithdrawalRecord) => w.status === 'completed')
-      .reduce((sum: number, w: WithdrawalRecord) => sum + w.netAmount, 0);
+          // Calculate available amount
+          type WithdrawalRecord = { status: string; netAmount: number };
+          const completedWithdrawals = withdrawals
+            .filter((w: WithdrawalRecord) => w.status === 'completed')
+            .reduce((sum: number, w: WithdrawalRecord) => sum + w.netAmount, 0);
 
-    const pendingWithdrawals = episode.withdrawals
-      .filter((w: WithdrawalRecord) => w.status === 'pending' || w.status === 'processing')
-      .reduce((sum: number, w: WithdrawalRecord) => sum + w.netAmount, 0);
+          const pendingWithdrawals = withdrawals
+            .filter((w: WithdrawalRecord) => w.status === 'pending' || w.status === 'processing')
+            .reduce((sum: number, w: WithdrawalRecord) => sum + w.netAmount, 0);
 
-    const grossAvailable = episode.totalRevenue;
-    const platformFee = calculatePlatformFee(grossAvailable);
-    const netTotal = calculateStreamerPayout(grossAvailable);
-    const available = netTotal - completedWithdrawals - pendingWithdrawals;
+          const netTotal = calculateStreamerPayout(ep.total_revenue);
+          const available = netTotal - completedWithdrawals - pendingWithdrawals;
 
-    if (available <= 0) {
-      throw new AppError('No funds available for withdrawal', 400, 'NO_FUNDS');
-    }
+          if (available <= 0) {
+            throw new AppError('No funds available for withdrawal', 400, 'NO_FUNDS');
+          }
 
-    // SECURITY: Calculate withdrawal amounts correctly
-    // The 'available' amount is the NET amount (after platform fee) that can be withdrawn.
-    // We need to calculate the corresponding GROSS amount for this withdrawal.
-    // Formula: netAmount = grossAmount * (1 - platformFeePercent/100)
-    // Therefore: grossAmount = netAmount / (1 - platformFeePercent/100)
-    const withdrawalGrossAmount = Math.round((available * 100) / (100 - PLATFORM_FEE_PERCENT));
-    const withdrawalPlatformFee = withdrawalGrossAmount - available;
+          // SECURITY: Calculate withdrawal amounts correctly
+          const withdrawalGrossAmount = Math.round((available * 100) / (100 - PLATFORM_FEE_PERCENT));
+          const withdrawalPlatformFee = withdrawalGrossAmount - available;
 
-    // Create withdrawal record
-    const withdrawal = await prisma.withdrawal.create({
-      data: {
-        streamerId: req.user!.id,
-        episodeId,
-        amount: withdrawalGrossAmount,
-        platformFee: withdrawalPlatformFee,
-        netAmount: available,
-        status: 'processing',
-      },
-    });
+          // Create withdrawal record inside transaction (holds the row lock)
+          const withdrawal = await tx.withdrawal.create({
+            data: {
+              streamerId: req.user!.id,
+              episodeId,
+              amount: withdrawalGrossAmount,
+              platformFee: withdrawalPlatformFee,
+              netAmount: available,
+              status: 'processing',
+            },
+          });
 
+          return { withdrawal, available };
+        },
+        {
+          isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+          timeout: 10000,
+        }
+      )
+    );
+
+    // Stripe transfer OUTSIDE transaction (don't hold DB lock during network call)
     try {
-      // Create Stripe transfer with idempotency key based on withdrawal ID
       const transferId = await createTransfer(
         available,
         user.stripeAccountId,
@@ -289,7 +312,6 @@ router.post('/withdraw/:episodeId', requireStreamer, async (req: AuthenticatedRe
         withdrawal.id
       );
 
-      // Update withdrawal with transfer ID
       await prisma.withdrawal.update({
         where: { id: withdrawal.id },
         data: {
@@ -308,20 +330,17 @@ router.post('/withdraw/:episodeId', requireStreamer, async (req: AuthenticatedRe
         },
       });
     } catch (err: any) {
-      // Log the actual error for debugging (server-side only)
       console.error('Stripe transfer failed:', err.message);
 
-      // Update withdrawal as failed (store details for internal use)
       await prisma.withdrawal.update({
         where: { id: withdrawal.id },
         data: {
           status: 'failed',
-          failedReason: err.message, // Stored for admin review, not exposed to client
+          failedReason: err.message,
         },
       });
 
       // SECURITY: Don't expose raw Stripe error details to clients
-      // They may contain sensitive implementation details
       throw new AppError(
         'Transfer failed. Please try again or contact support if the problem persists.',
         500,
