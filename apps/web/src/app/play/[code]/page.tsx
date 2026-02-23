@@ -391,7 +391,7 @@ export default function PlayPage() {
       <div>
         <h2 className="text-xl font-semibold mb-4 text-center">Leaderboard</h2>
         <div className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow">
-          <Leaderboard entries={leaderboard} currentUserId={user?.id} />
+          <Leaderboard entries={leaderboard} currentCardId={card?.id} />
         </div>
       </div>
     </div>
