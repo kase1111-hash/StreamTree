@@ -6,15 +6,15 @@ import { clsx } from 'clsx';
 interface LeaderboardEntry {
   rank: number;
   cardId: string;
-  holderId?: string;
   username: string;
   markedSquares: number;
   patterns: number | any[];
+  score?: number;
 }
 
 interface LeaderboardProps {
   entries: LeaderboardEntry[];
-  currentUserId?: string;
+  currentCardId?: string;
   maxEntries?: number;
   animate?: boolean;
 }
@@ -40,7 +40,7 @@ const RANK_COLORS = {
 
 export function Leaderboard({
   entries,
-  currentUserId,
+  currentCardId,
   maxEntries = 10,
   animate = true,
 }: LeaderboardProps) {
@@ -100,7 +100,7 @@ export function Leaderboard({
         const patternCount = Array.isArray(entry.patterns)
           ? entry.patterns.length
           : entry.patterns;
-        const isCurrentUser = entry.holderId === currentUserId;
+        const isCurrentUser = !!currentCardId && entry.cardId === currentCardId;
         const rankChange = rankChanges.get(entry.cardId);
         const colors = RANK_COLORS[entry.rank as 1 | 2 | 3];
 
@@ -192,11 +192,11 @@ export function Leaderboard({
 export function LeaderboardCompact({
   entries,
   maxEntries = 5,
-  currentUserId,
+  currentCardId,
 }: {
   entries: LeaderboardEntry[];
   maxEntries?: number;
-  currentUserId?: string;
+  currentCardId?: string;
 }) {
   const displayEntries = entries.slice(0, maxEntries);
 
@@ -211,7 +211,7 @@ export function LeaderboardCompact({
   return (
     <div className="space-y-2">
       {displayEntries.map((entry) => {
-        const isCurrentUser = entry.holderId === currentUserId;
+        const isCurrentUser = !!currentCardId && entry.cardId === currentCardId;
         const patternCount = Array.isArray(entry.patterns)
           ? entry.patterns.length
           : entry.patterns;
@@ -259,7 +259,7 @@ export function LeaderboardCompact({
 // Live leaderboard with auto-refresh animation
 export function LiveLeaderboard({
   entries,
-  currentUserId,
+  currentCardId,
   maxEntries = 10,
 }: LeaderboardProps) {
   return (
@@ -272,7 +272,7 @@ export function LiveLeaderboard({
 
       <Leaderboard
         entries={entries}
-        currentUserId={currentUserId}
+        currentCardId={currentCardId}
         maxEntries={maxEntries}
         animate
       />

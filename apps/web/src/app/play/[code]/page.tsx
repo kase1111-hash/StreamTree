@@ -37,8 +37,8 @@ export default function PlayPage() {
   const params = useParams();
   const router = useRouter();
   const shareCode = params.code as string;
-  const { user, token } = useAuth();
-  const { connected } = useWebSocket(token);
+  const { user } = useAuth();
+  const { connected } = useWebSocket(user);
 
   const [episode, setEpisode] = useState<PublicEpisode | null>(null);
   const [card, setCard] = useState<Card | null>(null);
@@ -59,10 +59,10 @@ export default function PlayPage() {
   }, [shareCode]);
 
   useEffect(() => {
-    if (token && episode) {
+    if (user && episode) {
       loadMyCard();
     }
-  }, [token, episode?.id]);
+  }, [user?.id, episode?.id]);
 
   const loadEpisode = async () => {
     try {
@@ -84,10 +84,10 @@ export default function PlayPage() {
   };
 
   const loadMyCard = async () => {
-    if (!token || !episode) return;
+    if (!user || !episode) return;
 
     try {
-      const data = await cardsApi.getMyForEpisode(episode.id, token);
+      const data = await cardsApi.getMyForEpisode(episode.id, '');
       setCard(data);
     } catch {
       // No card yet, that's okay
@@ -148,7 +148,7 @@ export default function PlayPage() {
   useCardEvents(card?.id || null, handleCardEvent);
 
   const handleMintCard = async () => {
-    if (!token || !episode) {
+    if (!user || !episode) {
       router.push(`/auth/login?redirect=/play/${shareCode}`);
       return;
     }
@@ -159,7 +159,7 @@ export default function PlayPage() {
     if (episode.cardPrice > 0) {
       // Paid card — create payment intent and show modal
       try {
-        const { clientSecret: secret, amount } = await cardsApi.createPaymentIntent(episode.id, token);
+        const { clientSecret: secret, amount } = await cardsApi.createPaymentIntent(episode.id, '');
         setClientSecret(secret);
         setPaymentAmount(amount);
         setShowPayment(true);
@@ -170,7 +170,7 @@ export default function PlayPage() {
     } else {
       // Free card — mint directly
       try {
-        const newCard = await cardsApi.mint(episode.id, token);
+        const newCard = await cardsApi.mint(episode.id, '');
         setCard(newCard);
       } catch (err: any) {
         setError(err.message || 'Failed to mint card');
@@ -241,7 +241,7 @@ export default function PlayPage() {
           >
             {isLive ? 'LIVE' : isEnded ? 'ENDED' : episode.status.toUpperCase()}
           </span>
-          {connected && token && (
+          {connected && user && (
             <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 rounded text-xs">
               Connected
             </span>
@@ -391,7 +391,7 @@ export default function PlayPage() {
       <div>
         <h2 className="text-xl font-semibold mb-4 text-center">Leaderboard</h2>
         <div className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow">
-          <Leaderboard entries={leaderboard} currentUserId={user?.id} />
+          <Leaderboard entries={leaderboard} currentCardId={card?.id} />
         </div>
       </div>
     </div>

@@ -38,8 +38,8 @@ export default function DashboardPage() {
   const params = useParams();
   const router = useRouter();
   const episodeId = params.id as string;
-  const { token } = useAuth();
-  const { connected } = useWebSocket(token);
+  const { user } = useAuth();
+  const { connected } = useWebSocket(user);
 
   const [episode, setEpisode] = useState<Episode | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -48,17 +48,17 @@ export default function DashboardPage() {
   const [ending, setEnding] = useState(false);
 
   useEffect(() => {
-    if (token && episodeId) {
+    if (user && episodeId) {
       loadEpisode();
       loadStats();
     }
-  }, [token, episodeId]);
+  }, [user?.id, episodeId]);
 
   const loadEpisode = async () => {
-    if (!token) return;
+    if (!user) return;
 
     try {
-      const data = await episodesApi.get(episodeId, token);
+      const data = await episodesApi.get(episodeId, '');
       setEpisode(data);
     } catch (err: any) {
       setError(err.message || 'Failed to load episode');
@@ -67,10 +67,10 @@ export default function DashboardPage() {
   };
 
   const loadStats = async () => {
-    if (!token) return;
+    if (!user) return;
 
     try {
-      const data = await episodesApi.getStats(episodeId, token);
+      const data = await episodesApi.getStats(episodeId, '');
       setStats(data);
     } catch (err: any) {
       console.error('Failed to load stats:', err);
@@ -107,10 +107,10 @@ export default function DashboardPage() {
   useEpisodeEvents(episodeId, handleEpisodeEvent);
 
   const handleFireEvent = async (eventId: string) => {
-    if (!token) return;
+    if (!user) return;
 
     try {
-      await episodesApi.fireEvent(episodeId, eventId, token);
+      await episodesApi.fireEvent(episodeId, eventId, '');
       // UI will update via WebSocket
     } catch (err: any) {
       setError(err.message || 'Failed to fire event');
@@ -118,13 +118,13 @@ export default function DashboardPage() {
   };
 
   const handleEndShow = async () => {
-    if (!token || !confirm('Are you sure you want to end this episode? This cannot be undone.')) {
+    if (!user || !confirm('Are you sure you want to end this episode? This cannot be undone.')) {
       return;
     }
 
     setEnding(true);
     try {
-      await episodesApi.end(episodeId, token);
+      await episodesApi.end(episodeId, '');
       router.push(`/episodes/${episodeId}/results`);
     } catch (err: any) {
       setError(err.message || 'Failed to end episode');

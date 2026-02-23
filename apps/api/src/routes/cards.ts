@@ -270,48 +270,54 @@ router.post('/mint/:episodeId/payment', async (req: AuthenticatedRequest, res, n
       throw new AppError('Already have a card for this episode', 400, 'DUPLICATE');
     }
 
-    // Check for an existing pending payment
-    const existingPending = await prisma.pendingPayment.findFirst({
-      where: {
-        episodeId: episode.id,
-        userId: req.user!.id,
-        status: 'pending',
-        expiresAt: { gt: new Date() },
-      },
-    });
+    // Atomically check for existing pending payment and create new one
+    // This prevents duplicate payment intents from concurrent requests
+    const userId = req.user!.id;
+    const pendingPayment = await prisma.$transaction(async (tx) => {
+      const existingPending = await tx.pendingPayment.findFirst({
+        where: {
+          episodeId: episode.id,
+          userId,
+          status: 'pending',
+          expiresAt: { gt: new Date() },
+        },
+      });
 
-    if (existingPending) {
-      throw new AppError(
-        'A payment is already in progress for this episode',
-        409,
-        'PAYMENT_IN_PROGRESS'
-      );
-    }
+      if (existingPending) {
+        throw new AppError(
+          'A payment is already in progress for this episode',
+          409,
+          'PAYMENT_IN_PROGRESS'
+        );
+      }
 
-    // Create payment intent
-    const { clientSecret, paymentIntentId } = await createPaymentIntent({
-      amount: episode.cardPrice,
-      episodeId: episode.id,
-      userId: req.user!.id,
-    });
-
-    // Track the pending payment (expires in 30 minutes)
-    await prisma.pendingPayment.create({
-      data: {
-        episodeId: episode.id,
-        userId: req.user!.id,
-        paymentIntentId,
+      // Create payment intent
+      const { clientSecret, paymentIntentId } = await createPaymentIntent({
         amount: episode.cardPrice,
-        status: 'pending',
-        expiresAt: new Date(Date.now() + 30 * 60 * 1000),
-      },
+        episodeId: episode.id,
+        userId,
+      });
+
+      // Track the pending payment (expires in 30 minutes)
+      await tx.pendingPayment.create({
+        data: {
+          episodeId: episode.id,
+          userId,
+          paymentIntentId,
+          amount: episode.cardPrice,
+          status: 'pending',
+          expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+        },
+      });
+
+      return { clientSecret, paymentIntentId };
     });
 
     res.status(201).json({
       success: true,
       data: {
-        clientSecret,
-        paymentIntentId,
+        clientSecret: pendingPayment.clientSecret,
+        paymentIntentId: pendingPayment.paymentIntentId,
         amount: episode.cardPrice,
       },
     });

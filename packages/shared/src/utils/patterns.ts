@@ -109,7 +109,8 @@ export function getPatternDescription(pattern: Pattern): string {
 /**
  * Calculates a score based on patterns
  */
-export function calculatePatternScore(patterns: Pattern[]): number {
+export function calculatePatternScore(patterns: Pattern[] | null | undefined): number {
+  if (!patterns) return 0;
   let score = 0;
 
   for (const pattern of patterns) {

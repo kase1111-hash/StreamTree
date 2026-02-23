@@ -79,8 +79,8 @@ export interface CardWithEpisode extends Card {
 export interface LeaderboardEntry {
   rank: number;
   cardId: string;
-  holderId: string;
   username: string;
   markedSquares: number;
   patterns: Pattern[];
+  score?: number;
 }

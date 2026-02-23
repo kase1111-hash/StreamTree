@@ -4,6 +4,198 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
+// ── Response Interfaces ─────────────────────────────────────────────
+
+export interface UserResponse {
+  id: string;
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  role: 'viewer' | 'streamer' | 'admin';
+  walletAddress: string | null;
+  createdAt: string;
+}
+
+export interface AuthResponse {
+  user: UserResponse;
+  token: string;
+  refreshToken: string;
+}
+
+export interface EpisodeEvent {
+  id: string;
+  name: string;
+  icon: string;
+  description: string | null;
+  firedAt: string | null;
+}
+
+export interface EpisodeListItem {
+  id: string;
+  name: string;
+  artworkUrl: string | null;
+  status: string;
+  cardPrice: number;
+  cardsMinted: number;
+  maxCards: number | null;
+  gridSize: number;
+  shareCode: string;
+  createdAt: string;
+}
+
+export interface EpisodeDetail extends EpisodeListItem {
+  events: EpisodeEvent[];
+}
+
+export interface EpisodeStats {
+  totalCards: number;
+  totalRevenue: number;
+  eventsFired: number;
+  totalEvents: number;
+  topPatterns: Array<{ type: string; count: number }>;
+}
+
+export interface EpisodeResults {
+  episode: EpisodeDetail;
+  leaderboard: LeaderboardEntryResponse[];
+  stats: EpisodeStats;
+}
+
+export interface GridSquareResponse {
+  eventId: string;
+  eventName: string;
+  eventIcon: string;
+  position: { row: number; col: number };
+  marked: boolean;
+  markedAt: string | null;
+}
+
+export interface PatternResponse {
+  type: 'row' | 'column' | 'diagonal' | 'blackout';
+  index?: number;
+  direction?: 'main' | 'anti';
+}
+
+export interface CardResponse {
+  id: string;
+  episodeId: string;
+  holderId: string;
+  grid: GridSquareResponse[][];
+  markedSquares: number;
+  patterns: PatternResponse[];
+  status: string;
+  createdAt: string;
+}
+
+export interface GalleryCard {
+  id: string;
+  episodeId: string;
+  episodeName: string;
+  artworkUrl: string | null;
+  markedSquares: number;
+  patterns: PatternResponse[];
+  status: string;
+  createdAt: string;
+}
+
+export interface LeaderboardEntryResponse {
+  rank: number;
+  cardId: string;
+  username: string;
+  markedSquares: number;
+  patterns: number;
+  score: number;
+}
+
+export interface PublicEpisodeResponse {
+  id: string;
+  name: string;
+  artworkUrl: string | null;
+  status: string;
+  cardPrice: number;
+  cardsMinted: number;
+  maxCards: number | null;
+  gridSize: number;
+  shareCode: string;
+  isSoldOut: boolean;
+  events: EpisodeEvent[];
+  streamer: {
+    username: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
+}
+
+export interface UserStats {
+  totalCards: number;
+  totalPatterns: number;
+  episodesPlayed: number;
+  bestScore: number;
+}
+
+export interface PaymentSettings {
+  stripeConnected: boolean;
+  stripeAccountId: string | null;
+  payoutsEnabled: boolean;
+}
+
+export interface EarningsSummary {
+  totalEarnings: number;
+  availableBalance: number;
+  pendingBalance: number;
+  episodes: Array<{
+    episodeId: string;
+    episodeName: string;
+    earnings: number;
+    cardsSold: number;
+    withdrawn: boolean;
+  }>;
+}
+
+export interface WithdrawalResponse {
+  id: string;
+  amount: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface TemplateResponse {
+  id: string;
+  name: string;
+  description: string | null;
+  events: Array<{ name: string; icon: string; description: string | null }>;
+  gridSize: number;
+  createdAt: string;
+}
+
+export interface UploadResponse {
+  url: string;
+}
+
+// ── Update / Input Interfaces ───────────────────────────────────────
+
+export interface EpisodeUpdateData {
+  name?: string;
+  cardPrice?: number;
+  maxCards?: number | null;
+  artworkUrl?: string | null;
+}
+
+export interface EventUpdateData {
+  name?: string;
+  icon?: string;
+  description?: string;
+}
+
+export interface TemplateUpdateData {
+  name?: string;
+  description?: string;
+  events?: Array<{ name: string; icon?: string; description?: string }>;
+  gridSize?: number;
+}
+
+// ── Validation ──────────────────────────────────────────────────────
+
 /**
  * Validates a file before upload
  * @throws Error if file is invalid
@@ -33,6 +225,8 @@ function validateFileUpload(file: File, maxSize: number = MAX_FILE_SIZE): void {
     throw new ApiError('File is empty', 400, 'EMPTY_FILE');
   }
 }
+
+// ── Core API Client ─────────────────────────────────────────────────
 
 interface ApiOptions {
   method?: string;
@@ -85,16 +279,17 @@ export class ApiError extends Error {
   }
 }
 
-// Auth
+// ── Auth ─────────────────────────────────────────────────────────────
+
 export const authApi = {
   custodial: (username: string) =>
-    api<{ user: any; token: string; refreshToken: string }>('/api/auth/custodial', {
+    api<AuthResponse>('/api/auth/custodial', {
       method: 'POST',
       body: { username },
     }),
 
   wallet: (address: string, signature: string, message: string) =>
-    api<{ user: any; token: string; refreshToken: string }>('/api/auth/wallet', {
+    api<AuthResponse>('/api/auth/wallet', {
       method: 'POST',
       body: { address, signature, message },
     }),
@@ -112,67 +307,69 @@ export const authApi = {
     }),
 
   becomeStreamer: (token: string) =>
-    api<{ user: any; token: string }>('/api/auth/become-streamer', {
+    api<{ user: UserResponse; token: string }>('/api/auth/become-streamer', {
       method: 'POST',
       token,
     }),
 };
 
-// Episodes
+// ── Episodes ─────────────────────────────────────────────────────────
+
 export const episodesApi = {
   list: (token: string) =>
-    api<any[]>('/api/episodes', { token }),
+    api<EpisodeListItem[]>('/api/episodes', { token }),
 
   get: (id: string, token: string) =>
-    api<any>(`/api/episodes/${id}`, { token }),
+    api<EpisodeDetail>(`/api/episodes/${id}`, { token }),
 
   create: (data: { name: string; cardPrice?: number; maxCards?: number; gridSize?: number }, token: string) =>
-    api<any>('/api/episodes', { method: 'POST', body: data, token }),
+    api<EpisodeDetail>('/api/episodes', { method: 'POST', body: data, token }),
 
-  update: (id: string, data: any, token: string) =>
-    api<any>(`/api/episodes/${id}`, { method: 'PATCH', body: data, token }),
+  update: (id: string, data: EpisodeUpdateData, token: string) =>
+    api<EpisodeDetail>(`/api/episodes/${id}`, { method: 'PATCH', body: data, token }),
 
   delete: (id: string, token: string) =>
     api(`/api/episodes/${id}`, { method: 'DELETE', token }),
 
   launch: (id: string, token: string) =>
-    api<any>(`/api/episodes/${id}/launch`, { method: 'POST', token }),
+    api<EpisodeDetail>(`/api/episodes/${id}/launch`, { method: 'POST', token }),
 
   end: (id: string, token: string) =>
-    api<any>(`/api/episodes/${id}/end`, { method: 'POST', token }),
+    api<EpisodeDetail>(`/api/episodes/${id}/end`, { method: 'POST', token }),
 
   getStats: (id: string, token: string) =>
-    api<any>(`/api/episodes/${id}/stats`, { token }),
+    api<EpisodeStats>(`/api/episodes/${id}/stats`, { token }),
 
   addEvent: (episodeId: string, data: { name: string; icon?: string; description?: string }, token: string) =>
-    api<any>(`/api/episodes/${episodeId}/events`, { method: 'POST', body: data, token }),
+    api<EpisodeEvent>(`/api/episodes/${episodeId}/events`, { method: 'POST', body: data, token }),
 
-  updateEvent: (episodeId: string, eventId: string, data: any, token: string) =>
-    api<any>(`/api/episodes/${episodeId}/events/${eventId}`, { method: 'PATCH', body: data, token }),
+  updateEvent: (episodeId: string, eventId: string, data: EventUpdateData, token: string) =>
+    api<EpisodeEvent>(`/api/episodes/${episodeId}/events/${eventId}`, { method: 'PATCH', body: data, token }),
 
   deleteEvent: (episodeId: string, eventId: string, token: string) =>
     api(`/api/episodes/${episodeId}/events/${eventId}`, { method: 'DELETE', token }),
 
   fireEvent: (episodeId: string, eventId: string, token: string) =>
-    api<any>(`/api/episodes/${episodeId}/events/${eventId}/fire`, { method: 'POST', token }),
+    api<EpisodeEvent>(`/api/episodes/${episodeId}/events/${eventId}/fire`, { method: 'POST', token }),
 
   getResults: (id: string, token?: string) =>
-    api<any>(`/api/episodes/${id}/results`, { token }),
+    api<EpisodeResults>(`/api/episodes/${id}/results`, { token }),
 };
 
-// Cards
+// ── Cards ────────────────────────────────────────────────────────────
+
 export const cardsApi = {
   getMy: (token: string) =>
-    api<any[]>('/api/cards/my', { token }),
+    api<CardResponse[]>('/api/cards/my', { token }),
 
   getMyForEpisode: (episodeId: string, token: string) =>
-    api<any>(`/api/cards/my/${episodeId}`, { token }),
+    api<CardResponse>(`/api/cards/my/${episodeId}`, { token }),
 
   get: (id: string, token: string) =>
-    api<any>(`/api/cards/${id}`, { token }),
+    api<CardResponse>(`/api/cards/${id}`, { token }),
 
   mint: (episodeId: string, token: string) =>
-    api<any>(`/api/cards/mint/${episodeId}`, { method: 'POST', token }),
+    api<CardResponse>(`/api/cards/mint/${episodeId}`, { method: 'POST', token }),
 
   createPaymentIntent: (episodeId: string, token: string) =>
     api<{ clientSecret: string; paymentIntentId: string; amount: number }>(
@@ -181,40 +378,43 @@ export const cardsApi = {
     ),
 
   getGallery: (token: string) =>
-    api<any[]>('/api/cards/gallery/all', { token }),
+    api<GalleryCard[]>('/api/cards/gallery/all', { token }),
 };
 
-// Public
+// ── Public ───────────────────────────────────────────────────────────
+
 export const publicApi = {
   getEpisode: (shareCode: string) =>
-    api<any>(`/api/public/episode/${shareCode}`),
+    api<PublicEpisodeResponse>(`/api/public/episode/${shareCode}`),
 
   getLeaderboard: (shareCode: string) =>
-    api<any[]>(`/api/public/episode/${shareCode}/leaderboard`),
+    api<LeaderboardEntryResponse[]>(`/api/public/episode/${shareCode}/leaderboard`),
 
   checkUsername: (username: string) =>
     api<{ available: boolean }>(`/api/public/username-available/${username}`),
 };
 
-// Users
+// ── Users ────────────────────────────────────────────────────────────
+
 export const usersApi = {
   getMe: (token: string) =>
-    api<any>('/api/users/me', { token }),
+    api<UserResponse>('/api/users/me', { token }),
 
   updateMe: (data: { displayName?: string; avatarUrl?: string }, token: string) =>
-    api<any>('/api/users/me', { method: 'PATCH', body: data, token }),
+    api<UserResponse>('/api/users/me', { method: 'PATCH', body: data, token }),
 
   getStats: (token: string) =>
-    api<any>('/api/users/me/stats', { token }),
+    api<UserStats>('/api/users/me/stats', { token }),
 
   linkWallet: (token: string, walletAddress: string) =>
-    api<any>('/api/users/me/wallet', { method: 'POST', body: { walletAddress }, token }),
+    api<UserResponse>('/api/users/me/wallet', { method: 'POST', body: { walletAddress }, token }),
 };
 
-// Payments
+// ── Payments ─────────────────────────────────────────────────────────
+
 export const paymentsApi = {
   getSettings: (token: string) =>
-    api<any>('/api/payments/settings', { token }),
+    api<PaymentSettings>('/api/payments/settings', { token }),
 
   connectStripe: (email: string, token: string) =>
     api<{ onboardingUrl: string }>('/api/payments/connect', {
@@ -224,13 +424,13 @@ export const paymentsApi = {
     }),
 
   getEarnings: (token: string) =>
-    api<any>('/api/payments/earnings', { token }),
+    api<EarningsSummary>('/api/payments/earnings', { token }),
 
   withdraw: (episodeId: string, token: string) =>
-    api<any>(`/api/payments/withdraw/${episodeId}`, { method: 'POST', token }),
+    api<WithdrawalResponse>(`/api/payments/withdraw/${episodeId}`, { method: 'POST', token }),
 
   getWithdrawals: (token: string) =>
-    api<any[]>('/api/payments/withdrawals', { token }),
+    api<WithdrawalResponse[]>('/api/payments/withdrawals', { token }),
 
   createPaymentIntent: (episodeId: string, token: string) =>
     api<{ clientSecret: string }>(`/api/cards/mint/${episodeId}/payment`, {
@@ -239,7 +439,8 @@ export const paymentsApi = {
     }),
 };
 
-// Upload
+// ── Upload ───────────────────────────────────────────────────────────
+
 export const uploadApi = {
   uploadArtwork: async (file: File, episodeId: string, token: string) => {
     // SECURITY: Validate file before upload
@@ -269,7 +470,7 @@ export const uploadApi = {
       );
     }
 
-    return data.data;
+    return data.data as UploadResponse;
   },
 
   uploadAvatar: async (file: File, token: string) => {
@@ -299,20 +500,21 @@ export const uploadApi = {
       );
     }
 
-    return data.data;
+    return data.data as UploadResponse;
   },
 
   deleteArtwork: (episodeId: string, token: string) =>
     api(`/api/upload/artwork/${episodeId}`, { method: 'DELETE', token }),
 };
 
-// Templates
+// ── Templates ────────────────────────────────────────────────────────
+
 export const templatesApi = {
   getMy: (token: string) =>
-    api<any[]>('/api/templates/my', { token }),
+    api<TemplateResponse[]>('/api/templates/my', { token }),
 
   get: (id: string, token: string) =>
-    api<any>(`/api/templates/${id}`, { token }),
+    api<TemplateResponse>(`/api/templates/${id}`, { token }),
 
   create: (
     data: {
@@ -323,22 +525,21 @@ export const templatesApi = {
     },
     token: string
   ) =>
-    api<any>('/api/templates', { method: 'POST', body: data, token }),
+    api<TemplateResponse>('/api/templates', { method: 'POST', body: data, token }),
 
-  update: (id: string, data: any, token: string) =>
-    api<any>(`/api/templates/${id}`, { method: 'PATCH', body: data, token }),
+  update: (id: string, data: TemplateUpdateData, token: string) =>
+    api<TemplateResponse>(`/api/templates/${id}`, { method: 'PATCH', body: data, token }),
 
   delete: (id: string, token: string) =>
     api(`/api/templates/${id}`, { method: 'DELETE', token }),
 
   use: (id: string, data: { episodeName?: string; cardPrice?: number; maxCards?: number }, token: string) =>
-    api<any>(`/api/templates/${id}/use`, { method: 'POST', body: data, token }),
+    api<EpisodeDetail>(`/api/templates/${id}/use`, { method: 'POST', body: data, token }),
 
   fromEpisode: (
     episodeId: string,
     data: { name: string; description?: string },
     token: string
   ) =>
-    api<any>(`/api/templates/from-episode/${episodeId}`, { method: 'POST', body: data, token }),
+    api<TemplateResponse>(`/api/templates/from-episode/${episodeId}`, { method: 'POST', body: data, token }),
 };
-

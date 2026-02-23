@@ -125,8 +125,6 @@ Audience cards update instantly.
 ### Integrated (Advanced)
 Connect to stream events:
 - Twitch alerts API (donations, subs, raids)
-- Chat keyword detection
-- OBS scene changes
 - Custom webhooks
 
 Events fire automatically.
@@ -158,7 +156,6 @@ The generated cards layer your art with:
 ### Play
 - Card appears in overlay or separate tab
 - Squares light up as events happen
-- Optional: click to mark manually (honor system mode)
 - Chase patterns (row, diagonal, blackout)
 
 ### Keep
@@ -246,7 +243,6 @@ For the ecosystem:
 
 ## Future
 
-- Templates (bingo, predictions, trivia)
 - Cross-episode rewards (season passes)
 - Collaboration shows (multi-streamer roots)
 - Fruit evolution (repeat viewers get upgrades)

@@ -56,7 +56,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
     // SECURITY: Authenticate from HttpOnly cookie instead of URL query parameter
     // This prevents token exposure in logs, browser history, and network analysis
     const cookies = req.headers.cookie ? cookie.parse(req.headers.cookie) : {};
-    const accessToken = cookies.access_token;
+    const accessToken = cookies.streamtree_access_token;
 
     if (accessToken) {
       try {

@@ -763,19 +763,25 @@ router.post('/:id/events/:eventId/fire', requireStreamer, async (req: Authentica
     // Update each card's grid
     for (const card of cards) {
       const grid = card.grid as any[][];
-      let updated = false;
+      const newlyMarked: any[] = [];
 
       for (let row = 0; row < grid.length; row++) {
         for (let col = 0; col < grid[row].length; col++) {
           if (grid[row][col].eventId === event.id && !grid[row][col].marked) {
+            const markedAt = new Date().toISOString();
             grid[row][col].marked = true;
-            grid[row][col].markedAt = new Date().toISOString();
-            updated = true;
+            grid[row][col].markedAt = markedAt;
+            newlyMarked.push({
+              eventId: grid[row][col].eventId,
+              position: { row, col },
+              marked: true,
+              markedAt,
+            });
           }
         }
       }
 
-      if (updated) {
+      if (newlyMarked.length > 0) {
         cardsAffected++;
 
         // Count marked squares
@@ -793,12 +799,13 @@ router.post('/:id/events/:eventId/fire', requireStreamer, async (req: Authentica
           },
         });
 
-        // Broadcast card update
+        // Broadcast card update with newly-marked square details
         broadcastToEpisode(episode.id, {
           type: 'card:updated',
           cardId: card.id,
-          markedSquares: markedCount,
-          patterns,
+          markedSquares: newlyMarked,
+          newPatterns: patterns,
+          totalMarked: markedCount,
           triggeredBy: 'manual',
         });
       }
