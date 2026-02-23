@@ -71,26 +71,16 @@ Files to change:
 
 The frontend handler (`play/[code]/page.tsx:120-145`) is already written correctly for the spec shape — no frontend changes needed if you fix the server.
 
-### 1.2 Apply unused rate limiters
+### 1.2 Apply unused `walletAuthRateLimiter`
 
 **Severity:** Security gap
 **Audit finding:** B2 (Configuration Used)
 
-Two rate limiters are exported from `apps/api/src/middleware/rateLimit.ts` but never applied:
+`walletAuthRateLimiter` (5 req/15min) is exported from `apps/api/src/middleware/rateLimit.ts:36` but never imported or applied anywhere. It was created to prevent wallet auth brute force attacks.
 
-| Limiter | Purpose | Where to apply |
-|---------|---------|---------------|
-| `walletAuthRateLimiter` (5 req/15min) | Prevent wallet auth brute force | `apps/api/src/index.ts:146` — apply to wallet auth route specifically |
-| `usernameCheckRateLimiter` (10 req/min) | Prevent username enumeration | `apps/api/src/routes/public.ts` — apply to the `GET /username-available/:username` endpoint |
+**Note:** `usernameCheckRateLimiter` was originally flagged in the audit but is actually already applied at `apps/api/src/routes/public.ts:4,119`. Only `walletAuthRateLimiter` is a true ghost export.
 
-**File: `apps/api/src/index.ts`**
-
-Current line 146:
-```ts
-app.use('/api/auth', authRateLimiter, authRouter);
-```
-
-The `walletAuthRateLimiter` should be applied inside the auth router to the wallet-specific endpoint (`POST /api/auth/wallet`), since the generic `authRateLimiter` is already applied at the router level. The tighter wallet limiter should be middleware on the specific route.
+The `walletAuthRateLimiter` should be applied inside the auth router to the wallet-specific endpoint (`POST /api/auth/wallet`), since the generic `authRateLimiter` (10 req/15min) is already applied at the router level. The tighter wallet limiter stacks on top for this sensitive endpoint.
 
 **File: `apps/api/src/routes/auth.ts`**
 
@@ -102,15 +92,6 @@ import { walletAuthRateLimiter } from '../middleware/rateLimit.js';
 Apply to the wallet auth endpoint:
 ```ts
 router.post('/wallet', walletAuthRateLimiter, async (req: AuthenticatedRequest, res, next) => {
-```
-
-**File: `apps/api/src/routes/public.ts`**
-
-Add import and apply `usernameCheckRateLimiter` to the username availability endpoint:
-```ts
-import { usernameCheckRateLimiter } from '../middleware/rateLimit.js';
-
-router.get('/username-available/:username', usernameCheckRateLimiter, async (req, res, next) => {
 ```
 
 ---
@@ -441,23 +422,23 @@ Then update every call site across `apps/web/src/`:
 
 Also remove `token` from the `AuthContextType` interface and the context provider value in `auth-context.tsx`.
 
-### 3.3 Remove or use `swr` / `@tanstack/react-query`
+### 3.3 Remove unused `swr` dependency
 
 **Audit finding:** C3 (Frontend State)
 
-Both are declared in `apps/web/package.json` (lines 14, 19) but **zero imports exist** anywhere in `apps/web/src/`. All data fetching uses raw `useEffect` + `useState` + direct API calls.
+Both `swr` and `@tanstack/react-query` are declared in `apps/web/package.json` (lines 14, 19). However:
 
-**Recommended approach:** Remove both. The current pattern works and adding a data-fetching library mid-project without migrating all call sites creates inconsistency.
+- **`@tanstack/react-query` IS actively used** — imported in `apps/web/src/lib/wallet-provider.tsx:6` for wagmi/RainbowKit wallet integration (`QueryClient`, `QueryClientProvider`). **Do NOT remove.**
+- **`swr` is NOT imported anywhere** in the codebase. It is a true phantom dependency.
+
+All page-level data fetching uses raw `useEffect` + `useState` + direct API calls, not SWR.
 
 **File: `apps/web/package.json`**
 
-Remove from `dependencies`:
+Remove only `swr` from `dependencies`:
 ```diff
--    "@tanstack/react-query": "^5.17.0",
 -    "swr": "^2.2.4",
 ```
-
-**Note:** `@tanstack/react-query` is a peer dependency of `@rainbow-me/rainbowkit`. Check if RainbowKit still works after removing it. If it breaks, keep `@tanstack/react-query` but remove `swr`. RainbowKit may provide its own QueryClient internally.
 
 ### 3.4 Remove or use `zod`
 
@@ -719,12 +700,12 @@ The README mentions removed features. Update these sections:
 | # | Phase | Finding | Files Changed | Estimated Scope |
 |---|-------|---------|--------------|-----------------|
 | 1.1 | Phase 1 | `card:updated` data shape | 3 files | Small (type + 2 emitters) |
-| 1.2 | Phase 1 | Unused rate limiters | 2 files | Tiny (add imports + middleware) |
+| 1.2 | Phase 1 | Unused walletAuthRateLimiter | 1 file | Tiny (add import + middleware) |
 | 2.1 | Phase 2 | Test infrastructure | 4 new files | Medium (setup + fixtures) |
 | 2.2 | Phase 2 | Critical path tests | 5 new files | Large (50+ test cases) |
 | 3.1 | Phase 3 | Structured logging | 18 files (2 new, 16 modified) | Large (132 replacements) |
 | 3.2 | Phase 3 | Remove `token` param | ~15 files | Large (API + all pages) |
-| 3.3 | Phase 3 | Remove swr/react-query | 1 file | Tiny (package.json) |
+| 3.3 | Phase 3 | Remove unused swr | 1 file | Tiny (package.json) |
 | 3.4 | Phase 3 | Remove zod | 1 file | Tiny (package.json) |
 | 3.5 | Phase 3 | Remove ghost env vars | 1 file | Tiny (.env.example) |
 | 4.1 | Phase 4 | PendingPayment cleanup | 2 files (1 new, 1 modified) | Small |
@@ -752,7 +733,7 @@ Phase 3 (cleanup) ─── can run in parallel with Phase 2
     │
     ├── 3.1 structured logging (independent)
     ├── 3.2 remove token param (independent)
-    ├── 3.3 remove swr/react-query (independent)
+    ├── 3.3 remove swr (independent, keep react-query for RainbowKit)
     ├── 3.4 remove zod (independent)
     └── 3.5 remove ghost env vars (independent)
          │
