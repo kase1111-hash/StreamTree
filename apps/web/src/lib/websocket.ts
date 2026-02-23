@@ -171,7 +171,9 @@ export function useEpisodeEvents(
       if (
         (event.type === 'episode:state' && event.episodeId === episodeId) ||
         (event.type === 'event:fired' && event.episodeId === episodeId) ||
-        (event.type === 'stats:update' && event.episodeId === episodeId)
+        (event.type === 'stats:update' && event.episodeId === episodeId) ||
+        (event.type === 'card:minted' && event.episodeId === episodeId) ||
+        (event.type === 'payment:refunded' && event.episodeId === episodeId)
       ) {
         onEvent(event);
       }
