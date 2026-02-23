@@ -73,6 +73,11 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     return;
   }
 
+  if (!episodeId || !userId) {
+    console.error('Payment metadata missing required fields (episodeId, userId). PaymentIntent:', paymentIntent.id);
+    return;
+  }
+
   // Check if card already exists (idempotency)
   const existingCard = await prisma.card.findFirst({
     where: { paymentId: paymentIntent.id },

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { usernameCheckRateLimiter } from '../middleware/rateLimit.js';
+import { calculatePatternScore } from '@streamtree/shared';
 
 /**
  * SECURITY: Add random delay to prevent timing-based enumeration
@@ -88,10 +89,8 @@ router.get('/episode/:shareCode/leaderboard', async (req, res, next) => {
       throw new AppError('Episode not found', 404, 'NOT_FOUND');
     }
 
-    const leaderboard = await prisma.card.findMany({
+    const leaderboardRaw = await prisma.card.findMany({
       where: { episodeId: episode.id },
-      orderBy: { markedSquares: 'desc' },
-      take: 20,
       include: {
         holder: {
           select: { id: true, username: true, displayName: true },
@@ -99,14 +98,24 @@ router.get('/episode/:shareCode/leaderboard', async (req, res, next) => {
       },
     });
 
+    // Sort by pattern score + marked squares (consistent with internal leaderboard)
+    const leaderboard = leaderboardRaw
+      .map((card: typeof leaderboardRaw[number]) => ({
+        ...card,
+        score: calculatePatternScore(card.patterns as any[]) + card.markedSquares,
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 20);
+
     res.json({
       success: true,
-      data: leaderboard.map((card: typeof leaderboard[number], index: number) => ({
+      data: leaderboard.map((card, index: number) => ({
         rank: index + 1,
         cardId: card.id,
         username: card.holder.displayName || card.holder.username,
         markedSquares: card.markedSquares,
         patterns: (card.patterns as unknown[]).length,
+        score: card.score,
       })),
     });
   } catch (error) {

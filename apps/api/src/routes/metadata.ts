@@ -181,7 +181,7 @@ router.get('/fruit/:id', async (req, res, next) => {
       return res.status(404).json({ error: 'Card not fruited yet' });
     }
 
-    const patterns = card.patterns as any[];
+    const patterns = (card.patterns as any[]) || [];
     const totalSquares = card.episode.gridSize * card.episode.gridSize;
     const completionRate = Math.round((card.markedSquares / totalSquares) * 100);
 
