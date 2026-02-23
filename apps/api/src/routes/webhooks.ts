@@ -335,20 +335,26 @@ async function fireEventFromTwitch(
 
     for (const card of cards) {
       const grid = card.grid as any[][];
-      let updated = false;
+      const newlyMarked: any[] = [];
 
       // Mark squares that match this event
       for (let row = 0; row < grid.length; row++) {
         for (let col = 0; col < grid[row].length; col++) {
           if (grid[row][col].eventId === eventId && !grid[row][col].marked) {
+            const markedAt = new Date().toISOString();
             grid[row][col].marked = true;
-            grid[row][col].markedAt = new Date();
-            updated = true;
+            grid[row][col].markedAt = markedAt;
+            newlyMarked.push({
+              eventId: grid[row][col].eventId,
+              position: { row, col },
+              marked: true,
+              markedAt,
+            });
           }
         }
       }
 
-      if (updated) {
+      if (newlyMarked.length > 0) {
         // Count marked squares
         let markedCount = 0;
         for (const row of grid) {
@@ -372,12 +378,13 @@ async function fireEventFromTwitch(
 
         cardsAffected++;
 
-        // Notify card holder
+        // Notify card holder with newly-marked square details
         sendToUser(card.holderId, {
           type: 'card:updated',
           cardId: card.id,
-          markedSquares: markedCount,
-          patterns,
+          markedSquares: newlyMarked,
+          newPatterns: patterns,
+          totalMarked: markedCount,
           triggeredBy: 'twitch',
         });
       }

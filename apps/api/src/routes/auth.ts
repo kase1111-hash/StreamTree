@@ -6,6 +6,7 @@ import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { generateShareCode } from '@streamtree/shared';
 import { sanitizeError } from '../utils/sanitize.js';
+import { walletAuthRateLimiter } from '../middleware/rateLimit.js';
 
 // SECURITY: Cookie configuration for HttpOnly tokens
 const isProduction = process.env.NODE_ENV === 'production';
@@ -233,7 +234,7 @@ router.post('/custodial', async (req, res, next) => {
 });
 
 // Wallet auth (for production)
-router.post('/wallet', async (req, res, next) => {
+router.post('/wallet', walletAuthRateLimiter, async (req, res, next) => {
   try {
     const { address, signature, message } = req.body;
 

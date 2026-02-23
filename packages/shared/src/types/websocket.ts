@@ -22,8 +22,9 @@ export interface EventFiredEvent {
 export interface CardUpdatedEvent {
   type: 'card:updated';
   cardId: string;
-  markedSquares: number;
-  patterns: Pattern[];
+  markedSquares: GridSquare[];
+  newPatterns: Pattern[];
+  totalMarked: number;
   triggeredBy?: string;
 }
 
