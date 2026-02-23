@@ -136,12 +136,14 @@ export const wsClient = new WebSocketClient();
 // React hook for WebSocket
 import { useEffect, useState } from 'react';
 
-export function useWebSocket(token: string | null) {
+export function useWebSocket(user: { id: string } | null) {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    if (token) {
-      wsClient.connect(token);
+    // Auth is cookie-based (HttpOnly streamtree_access_token cookie).
+    // Connect when a user session exists; the server reads the cookie directly.
+    if (user) {
+      wsClient.connect();
     }
 
     const unsubscribe = wsClient.subscribe((event) => {
@@ -153,7 +155,7 @@ export function useWebSocket(token: string | null) {
     return () => {
       unsubscribe();
     };
-  }, [token]);
+  }, [user?.id]);
 
   return { connected, wsClient };
 }
