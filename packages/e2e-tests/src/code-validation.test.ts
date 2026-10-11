@@ -215,6 +215,18 @@ describe('Code Validation', () => {
     });
   });
 
+  describe('Uploads', () => {
+    it('should mark multipart uploads as script-initiated for CSRF', () => {
+      const apiPath = join(WEB_ROOT, 'src/lib/api.ts');
+      const api = readFileSync(apiPath, 'utf-8');
+
+      // Multipart bodies can't use the JSON content type the API's CSRF check
+      // accepts, so both upload calls must send X-Requested-With instead
+      expect(api).toContain("'X-Requested-With': 'XMLHttpRequest'");
+      expect(api.match(/headers: uploadHeaders\(/g)?.length).toBe(2);
+    });
+  });
+
   describe('Gallery Enhancements', () => {
     it('should have enhanced gallery page with filtering', () => {
       const galleryPath = join(WEB_ROOT, 'src/app/gallery/page.tsx');

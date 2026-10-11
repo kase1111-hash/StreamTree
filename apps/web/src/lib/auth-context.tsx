@@ -14,12 +14,6 @@ interface User {
 
 interface AuthContextType {
   user: User | null;
-  /**
-   * @deprecated Token is now stored in HttpOnly cookies for security.
-   * API calls will automatically include cookies via credentials: 'include'.
-   * This returns an empty string for backwards compatibility with existing API calls.
-   */
-  token: string;
   loading: boolean;
   login: (username: string) => Promise<void>;
   loginWithWallet: (address: string, signature: string, message: string) => Promise<void>;
@@ -138,9 +132,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     <AuthContext.Provider
       value={{
         user,
-        // SECURITY: Token is now stored in HttpOnly cookies, not accessible to JS
-        // Empty string for backwards compatibility - API uses cookies via credentials: 'include'
-        token: '',
         loading,
         login,
         loginWithWallet,
