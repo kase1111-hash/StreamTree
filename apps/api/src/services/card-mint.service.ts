@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db/client.js';
-import { generateCardGrid } from '@streamtree/shared';
+import { generateCardGrid, detectPatterns } from '@streamtree/shared';
 import type { TriggerType, TriggerConfig } from '@streamtree/shared';
 import { withSerializableRetry } from '../utils/transaction.js';
 
@@ -140,13 +140,16 @@ export async function mintCardAtomically(
           }
         }
 
-        // 6. Create the card
+        // 6. Create the card. Squares pre-marked above can already complete
+        // patterns, and the fire-event paths only re-detect patterns on cards
+        // they mark a new square on, so record them now.
         const card = await tx.card.create({
           data: {
             episodeId: params.episodeId,
             holderId: params.holderId,
             grid: grid as any,
             markedSquares: markedCount,
+            patterns: detectPatterns(grid) as unknown as Prisma.InputJsonValue,
             cardNumber,
             ...(params.paymentId ? { paymentId: params.paymentId } : {}),
             ...(params.pricePaid ? { pricePaid: params.pricePaid } : {}),
