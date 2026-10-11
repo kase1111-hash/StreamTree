@@ -119,22 +119,24 @@ describe('Code Validation', () => {
       expect(patterns).toContain('export function detectPatterns');
     });
 
-    it('should use shared detectPatterns in episodes route', () => {
-      const episodesPath = join(API_ROOT, 'src/routes/episodes.ts');
-      const episodes = readFileSync(episodesPath, 'utf-8');
-      expect(episodes).toContain('detectPatterns');
-      expect(episodes).toContain("from '@streamtree/shared'");
+    it('should use shared detectPatterns in the event fire service', () => {
+      const servicePath = join(API_ROOT, 'src/services/event-fire.service.ts');
+      const service = readFileSync(servicePath, 'utf-8');
+      expect(service).toContain('detectPatterns');
+      expect(service).toContain("from '@streamtree/shared'");
       // Should not have local copy
-      expect(episodes).not.toContain('function detectCardPatterns');
+      expect(service).not.toContain('function detectPatterns');
     });
 
-    it('should use shared detectPatterns in webhooks route', () => {
-      const webhooksPath = join(API_ROOT, 'src/routes/webhooks.ts');
-      const webhooks = readFileSync(webhooksPath, 'utf-8');
-      expect(webhooks).toContain('detectPatterns');
-      expect(webhooks).toContain("from '@streamtree/shared'");
-      // Should not have local copy
-      expect(webhooks).not.toContain('function detectPatterns');
+    it('should fire events through the shared service in episodes and webhooks routes', () => {
+      for (const route of ['episodes.ts', 'webhooks.ts']) {
+        const source = readFileSync(join(API_ROOT, 'src/routes', route), 'utf-8');
+        expect(source).toContain("from '../services/event-fire.service.js'");
+        expect(source).toContain('fireEvent(');
+        // Should not have local copies of pattern detection
+        expect(source).not.toContain('function detectPatterns');
+        expect(source).not.toContain('function detectCardPatterns');
+      }
     });
   });
 

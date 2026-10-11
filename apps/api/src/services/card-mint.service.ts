@@ -40,10 +40,19 @@ export class MintError extends Error {
 }
 
 /**
- * Atomically mints a card inside a serializable transaction.
+ * Atomically mints a card.
  *
- * Uses SELECT ... FOR UPDATE on the episode row to serialize concurrent mints,
+ * SELECT ... FOR UPDATE on the episode row serializes concurrent mints,
  * preventing both duplicate cardNumber values and over-minting past maxCards.
+ * Firing an event takes the same lock while it records firedAt, and reads the
+ * episode's cards only after that commits, so a card is either minted with the
+ * event pre-marked or included in that fire.
+ *
+ * The transaction is READ COMMITTED on purpose: every statement after the lock
+ * sees the latest committed data. Under SERIALIZABLE the snapshot is taken by
+ * the lock statement itself, before the wait, so each queued mint read stale
+ * data and failed with a serialization error once the mint ahead of it
+ * committed.
  */
 export async function mintCardAtomically(
   params: MintCardParams
@@ -51,7 +60,7 @@ export async function mintCardAtomically(
   return withSerializableRetry(() =>
     prisma.$transaction(
       async (tx) => {
-        // 1. Lock the episode row to serialize concurrent mints
+        // 1. Lock the episode row to serialize with other mints and event fires
         const episodes: any[] = await tx.$queryRaw`
           SELECT * FROM episodes WHERE id = ${params.episodeId} FOR UPDATE
         `;
@@ -159,7 +168,7 @@ export async function mintCardAtomically(
         return { card, cardNumber };
       },
       {
-        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+        isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
         timeout: 10000,
       }
     )
