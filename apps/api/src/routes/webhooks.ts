@@ -1,9 +1,7 @@
 import { Router, Request, Response } from 'express';
 import Stripe from 'stripe';
-import { Prisma } from '@prisma/client';
 import { prisma } from '../db/client.js';
 import { stripe, createRefund } from '../services/stripe.service.js';
-import { detectPatterns } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats, sendToUser } from '../websocket/server.js';
 import {
   verifyWebhookSignature,
@@ -13,6 +11,7 @@ import {
 } from '../services/twitch.service.js';
 import { sanitizeError } from '../utils/sanitize.js';
 import { mintCardAtomically, MintError } from '../services/card-mint.service.js';
+import { fireEvent } from '../services/event-fire.service.js';
 
 const router = Router();
 
@@ -89,7 +88,7 @@ async function handlePaymentSuccess(paymentIntent: Stripe.PaymentIntent) {
     return;
   }
 
-  // Atomically mint the card (serializable transaction prevents race conditions)
+  // Atomically mint the card (the episode row lock prevents race conditions)
   let mintResult;
   try {
     mintResult = await mintCardAtomically({
@@ -320,91 +319,14 @@ async function fireEventFromTwitch(
   displayInfo: { title: string; description: string }
 ) {
   try {
-    // Update event definition
-    await prisma.eventDefinition.update({
-      where: { id: eventId },
-      data: {
-        firedAt: new Date(),
-        firedCount: { increment: 1 },
-      },
-    });
-
-    // Get all cards for this episode that have this event
-    const cards = await prisma.card.findMany({
-      where: {
-        episodeId,
-        status: 'active',
-      },
-    });
-
-    let cardsAffected = 0;
-
-    for (const card of cards) {
-      const grid = card.grid as any[][];
-      const newlyMarked: any[] = [];
-
-      // Mark squares that match this event
-      for (let row = 0; row < grid.length; row++) {
-        for (let col = 0; col < grid[row].length; col++) {
-          if (grid[row][col].eventId === eventId && !grid[row][col].marked) {
-            const markedAt = new Date().toISOString();
-            grid[row][col].marked = true;
-            grid[row][col].markedAt = markedAt;
-            newlyMarked.push({
-              eventId: grid[row][col].eventId,
-              position: { row, col },
-              marked: true,
-              markedAt,
-            });
-          }
-        }
-      }
-
-      if (newlyMarked.length > 0) {
-        // Count marked squares
-        let markedCount = 0;
-        for (const row of grid) {
-          for (const cell of row) {
-            if (cell.marked) markedCount++;
-          }
-        }
-
-        // Detect patterns
-        const patterns = detectPatterns(grid);
-
-        // Update card
-        await prisma.card.update({
-          where: { id: card.id },
-          data: {
-            grid,
-            markedSquares: markedCount,
-            patterns: patterns as unknown as Prisma.InputJsonValue,
-          },
-        });
-
-        cardsAffected++;
-
-        // Notify card holder with newly-marked square details
-        sendToUser(card.holderId, {
-          type: 'card:updated',
-          cardId: card.id,
-          markedSquares: newlyMarked,
-          newPatterns: patterns,
-          totalMarked: markedCount,
-          triggeredBy: 'twitch',
-        });
-      }
-    }
-
-    // Log fired event
-    await prisma.firedEvent.create({
-      data: {
-        episodeId,
-        eventDefinitionId: eventId,
-        firedBy: 'twitch',
-        cardsAffected,
-        triggerData: twitchEvent,
-      },
+    const { cardsAffected } = await fireEvent({
+      episodeId,
+      eventId,
+      firedBy: 'twitch',
+      triggeredBy: 'twitch',
+      triggerData: twitchEvent,
+      // Notify each card holder with the newly-marked square details
+      onCardUpdated: (holderId, cardUpdate) => sendToUser(holderId, cardUpdate),
     });
 
     // Get event name for broadcast

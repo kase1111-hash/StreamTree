@@ -9,7 +9,10 @@
     "test:ui": "vitest --ui"
   },
   "devDependencies": {
+    "@prisma/client": "^5.22.0",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20.11.0",
+    "jsonwebtoken": "^9.0.3",
     "typescript": "^5.3.0",
     "vitest": "^1.2.0"
   }

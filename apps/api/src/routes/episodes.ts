@@ -1,9 +1,8 @@
 import { Router } from 'express';
-import { Prisma } from '@prisma/client';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
-import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice, detectPatterns, calculatePatternScore } from '@streamtree/shared';
+import { generateShareCode, validateEpisodeName, validateGridSize, validateMaxCards, validateCardPrice, calculatePatternScore } from '@streamtree/shared';
 import { broadcastToEpisode, broadcastStats } from '../websocket/server.js';
 import {
   isBlockchainConfigured,
@@ -14,6 +13,7 @@ import {
   getContractAddress,
 } from '../services/blockchain.service.js';
 import { sanitizeError, validateSafeUrl } from '../utils/sanitize.js';
+import { fireEvent, FireError } from '../services/event-fire.service.js';
 
 const router = Router();
 
@@ -754,82 +754,22 @@ router.post('/:id/events/:eventId/fire', requireStreamer, async (req: Authentica
     // Streamers need the ability to manually fire twitch-triggered events when
     // the automated channel is down or when they want to override.
 
-    // Get all cards for this episode
-    const cards = await prisma.card.findMany({
-      where: { episodeId: episode.id, status: 'active' },
-    });
-
-    let cardsAffected = 0;
-
-    // Update each card's grid
-    for (const card of cards) {
-      const grid = card.grid as any[][];
-      const newlyMarked: any[] = [];
-
-      for (let row = 0; row < grid.length; row++) {
-        for (let col = 0; col < grid[row].length; col++) {
-          if (grid[row][col].eventId === event.id && !grid[row][col].marked) {
-            const markedAt = new Date().toISOString();
-            grid[row][col].marked = true;
-            grid[row][col].markedAt = markedAt;
-            newlyMarked.push({
-              eventId: grid[row][col].eventId,
-              position: { row, col },
-              marked: true,
-              markedAt,
-            });
-          }
-        }
-      }
-
-      if (newlyMarked.length > 0) {
-        cardsAffected++;
-
-        // Count marked squares
-        const markedCount = grid.flat().filter((sq) => sq.marked).length;
-
-        // Detect patterns
-        const patterns = detectPatterns(grid);
-
-        await prisma.card.update({
-          where: { id: card.id },
-          data: {
-            grid,
-            markedSquares: markedCount,
-            patterns: patterns as unknown as Prisma.InputJsonValue,
-          },
-        });
-
-        // Broadcast card update with newly-marked square details
-        broadcastToEpisode(episode.id, {
-          type: 'card:updated',
-          cardId: card.id,
-          markedSquares: newlyMarked,
-          newPatterns: patterns,
-          totalMarked: markedCount,
-          triggeredBy: 'manual',
-        });
-      }
-    }
-
-    // Record fired event
-    const firedEvent = await prisma.firedEvent.create({
-      data: {
+    let fired;
+    try {
+      fired = await fireEvent({
         episodeId: episode.id,
-        eventDefinitionId: event.id,
+        eventId: event.id,
         firedBy: 'owner',
-        cardsAffected,
-      },
-    });
-
-    // Update event definition
-    await prisma.eventDefinition.update({
-      where: { id: event.id },
-      data: {
-        firedAt: new Date(),
-        firedCount: { increment: 1 },
-      },
-    });
+        triggeredBy: 'manual',
+        onCardUpdated: (_holderId, cardUpdate) => broadcastToEpisode(episode.id, cardUpdate),
+      });
+    } catch (error) {
+      if (error instanceof FireError) {
+        throw new AppError(error.message, error.statusCode, error.code);
+      }
+      throw error;
+    }
+    const { firedEvent, cardsAffected } = fired;
 
     // Broadcast event fired
     broadcastToEpisode(episode.id, {

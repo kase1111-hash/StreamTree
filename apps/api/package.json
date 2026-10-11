@@ -12,7 +12,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "backfill:patterns": "node dist/scripts/backfill-card-patterns.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.490.0",

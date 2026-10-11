@@ -149,7 +149,7 @@ router.post('/mint/:episodeId', async (req: AuthenticatedRequest, res, next) => 
       );
     }
 
-    // Atomically mint the card (serializable transaction prevents race conditions)
+    // Atomically mint the card (the episode row lock prevents race conditions)
     let mintResult;
     try {
       mintResult = await mintCardAtomically({
