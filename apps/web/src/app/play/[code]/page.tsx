@@ -109,6 +109,8 @@ export default function PlayPage() {
       loadLeaderboard();
     } else if (event.type === 'episode:state' && event.status === 'ended') {
       setEpisode((prev) => (prev ? { ...prev, status: 'ended' } : prev));
+    } else if (event.type === 'stats:update') {
+      setEpisode((prev) => (prev ? { ...prev, cardsMinted: event.cardsMinted } : prev));
     } else if (event.type === 'card:minted' && event.holderId === user?.id) {
       // Our paid card was created by the webhook — load it
       setWaitingForCard(false);

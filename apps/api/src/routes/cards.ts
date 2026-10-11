@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest } from '../middleware/auth.js';
-import { broadcastToEpisode, broadcastStats, sendToUser } from '../websocket/server.js';
+import { broadcastStats } from '../websocket/server.js';
 import {
   isBlockchainConfigured,
   mintBranchToken,

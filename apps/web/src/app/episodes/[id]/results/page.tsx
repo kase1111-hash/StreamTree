@@ -4,34 +4,16 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
-import { episodesApi } from '@/lib/api';
+import { episodesApi, cardsApi, type EpisodeResults } from '@/lib/api';
 import { Leaderboard } from '@/components/Leaderboard';
-
-interface EpisodeResults {
-  id: string;
-  name: string;
-  artworkUrl: string | null;
-  status: string;
-  cardsMinted: number;
-  totalRevenue: number;
-  launchedAt: string;
-  endedAt: string;
-  streamer: {
-    id: string;
-    username: string;
-    displayName: string | null;
-  };
-  leaderboard: any[];
-  eventsFired: number;
-  totalEvents: number;
-}
 
 export default function EpisodeResultsPage() {
   const params = useParams();
   const episodeId = params.id as string;
-  const { user, token } = useAuth();
+  const { user } = useAuth();
 
   const [results, setResults] = useState<EpisodeResults | null>(null);
+  const [myCardId, setMyCardId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [showConfetti, setShowConfetti] = useState(true);
@@ -43,11 +25,24 @@ export default function EpisodeResultsPage() {
     // Hide confetti after 5 seconds
     const timer = setTimeout(() => setShowConfetti(false), 5000);
     return () => clearTimeout(timer);
-  }, [episodeId, token]);
+  }, [episodeId, user?.id]);
+
+  // Look up the viewer's own card so the leaderboard can highlight it
+  const userId = user?.id;
+  useEffect(() => {
+    if (!userId) {
+      setMyCardId(undefined);
+      return;
+    }
+    cardsApi
+      .getMyForEpisode(episodeId, '')
+      .then((card) => setMyCardId(card.id))
+      .catch(() => setMyCardId(undefined)); // No card for this episode
+  }, [episodeId, userId]);
 
   const loadResults = async () => {
     try {
-      const data = await episodesApi.getResults(episodeId, token || undefined);
+      const data = await episodesApi.getResults(episodeId);
       setResults(data);
     } catch (err: any) {
       setError(err.message || 'Failed to load results');
@@ -194,7 +189,7 @@ export default function EpisodeResultsPage() {
           <div className="bg-white dark:bg-gray-900 rounded-xl shadow-lg p-4">
             <Leaderboard
               entries={results.leaderboard}
-              currentUserId={user?.id}
+              currentCardId={myCardId}
               maxEntries={20}
               animate={false}
             />

@@ -4,7 +4,6 @@ import { v4 as uuid } from 'uuid';
 import { ethers } from 'ethers';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
-import { generateShareCode } from '@streamtree/shared';
 import { sanitizeError } from '../utils/sanitize.js';
 import { walletAuthRateLimiter } from '../middleware/rateLimit.js';
 
@@ -435,7 +434,7 @@ router.get('/me', async (req, res, next) => {
       }
 
       res.json({ success: true, data: { user } });
-    } catch (jwtError) {
+    } catch {
       // Token expired or invalid - try refresh
       const refreshToken = req.cookies?.[REFRESH_TOKEN_COOKIE];
       if (!refreshToken) {

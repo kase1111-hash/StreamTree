@@ -10,7 +10,6 @@ import {
   createConnectedAccount,
   getAccountStatus,
   createTransfer,
-  calculatePlatformFee,
   calculateStreamerPayout,
   PLATFORM_FEE_PERCENT,
 } from '../services/stripe.service.js';
@@ -227,10 +226,7 @@ router.post('/withdraw/:episodeId', requireStreamer, async (req: AuthenticatedRe
     // Uses SELECT ... FOR UPDATE to serialize concurrent withdrawal attempts
     const { withdrawal, available } = await withSerializableRetry<{ withdrawal: any; available: number }>(() =>
       prisma.$transaction(
-        async (txRaw) => {
-          // Cast to any — Prisma 5.9's TS types don't expose $queryRaw/models
-          // on the interactive transaction client, but they are available at runtime
-          const tx = txRaw as any;
+        async (tx) => {
           // Lock the episode row to prevent concurrent withdrawals
           const episodes: any[] = await tx.$queryRaw`
             SELECT * FROM episodes

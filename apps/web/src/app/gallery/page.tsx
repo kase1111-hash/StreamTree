@@ -31,7 +31,7 @@ type SortOption = 'newest' | 'oldest' | 'score' | 'patterns';
 type FilterOption = 'all' | 'bingo' | 'blackout' | 'nft';
 
 export default function GalleryPage() {
-  const { token } = useAuth();
+  const { user } = useAuth();
   const [cards, setCards] = useState<GalleryCard[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -43,18 +43,18 @@ export default function GalleryPage() {
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
-    if (token) {
+    if (user) {
       loadData();
     }
-  }, [token]);
+  }, [user?.id]);
 
   const loadData = async () => {
-    if (!token) return;
+    if (!user) return;
 
     try {
       const [cardsData, statsData] = await Promise.all([
-        cardsApi.getGallery(token),
-        usersApi.getStats(token),
+        cardsApi.getGallery(''),
+        usersApi.getStats(''),
       ]);
       setCards(cardsData);
       setStats(statsData);
@@ -144,7 +144,7 @@ export default function GalleryPage() {
     return { label: 'Common', color: 'bg-gray-500 text-white' };
   };
 
-  if (!token) {
+  if (!user) {
     return (
       <div className="max-w-6xl mx-auto px-4 py-8">
         <div className="text-center py-12">

@@ -6,6 +6,17 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/auth-context';
 import { publicApi } from '@/lib/api';
 
+// Where to go after signing in, e.g. back to the episode the viewer was joining.
+// Only same-site paths are honoured: '//host' and '/\host' resolve to other
+// origins in browsers, so they are rejected to avoid an open redirect.
+function getPostLoginPath(): string {
+  const target = new URLSearchParams(window.location.search).get('redirect');
+  if (target && target.startsWith('/') && !/^\/[\\/]/.test(target)) {
+    return target;
+  }
+  return '/';
+}
+
 export default function LoginPage() {
   const router = useRouter();
   const { login, loginWithWallet, user } = useAuth();
@@ -17,7 +28,7 @@ export default function LoginPage() {
 
   // Redirect if already logged in
   if (user) {
-    router.push('/');
+    router.push(getPostLoginPath());
     return null;
   }
 
@@ -58,7 +69,7 @@ export default function LoginPage() {
 
     try {
       await login(username);
-      router.push('/');
+      router.push(getPostLoginPath());
     } catch (err: any) {
       setError(err.message || 'Failed to sign in');
     }
@@ -87,7 +98,7 @@ export default function LoginPage() {
       });
 
       await loginWithWallet(address, signature, message);
-      router.push('/');
+      router.push(getPostLoginPath());
     } catch (err: any) {
       if (err.code === 4001) {
         setError('Wallet connection rejected');

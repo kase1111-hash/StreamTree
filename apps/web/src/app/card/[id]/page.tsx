@@ -32,23 +32,23 @@ interface Card {
 export default function CardPage() {
   const params = useParams();
   const cardId = params.id as string;
-  const { user, token } = useAuth();
+  const { user } = useAuth();
 
   const [card, setCard] = useState<Card | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    if (token) {
+    if (user) {
       loadCard();
     }
-  }, [token, cardId]);
+  }, [user?.id, cardId]);
 
   const loadCard = async () => {
-    if (!token) return;
+    if (!user) return;
 
     try {
-      const data = await cardsApi.get(cardId, token);
+      const data = await cardsApi.get(cardId, '');
       setCard(data);
     } catch (err: any) {
       setError(err.message || 'Failed to load card');
@@ -56,7 +56,7 @@ export default function CardPage() {
     setLoading(false);
   };
 
-  if (!token) {
+  if (!user) {
     return (
       <div className="max-w-2xl mx-auto px-4 py-8">
         <div className="text-center py-12">
