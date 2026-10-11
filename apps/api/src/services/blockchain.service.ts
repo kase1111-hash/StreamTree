@@ -518,7 +518,7 @@ export async function getTokenURI(tokenId: string): Promise<string | null> {
 export function generateMetadataUri(
   type: 'root' | 'branch' | 'fruit',
   id: string,
-  data: Record<string, unknown>
+  _data: Record<string, unknown>
 ): string {
   // In production, upload to IPFS and return ipfs:// URI
   // For now, return API endpoint that serves metadata

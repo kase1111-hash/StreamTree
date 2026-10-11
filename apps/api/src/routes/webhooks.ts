@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import Stripe from 'stripe';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db/client.js';
 import { stripe, createRefund } from '../services/stripe.service.js';
 import { detectPatterns } from '@streamtree/shared';
@@ -377,7 +378,7 @@ async function fireEventFromTwitch(
           data: {
             grid,
             markedSquares: markedCount,
-            patterns,
+            patterns: patterns as unknown as Prisma.InputJsonValue,
           },
         });
 

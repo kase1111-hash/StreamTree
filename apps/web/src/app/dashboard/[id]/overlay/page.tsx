@@ -8,7 +8,7 @@ import { episodesApi } from '@/lib/api';
 export default function OverlayConfigPage() {
   const params = useParams();
   const episodeId = params.id as string;
-  const { token } = useAuth();
+  const { user } = useAuth();
 
   const [episode, setEpisode] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -25,11 +25,11 @@ export default function OverlayConfigPage() {
   });
 
   useEffect(() => {
-    if (!token) return;
+    if (!user) return;
 
     const fetchEpisode = async () => {
       try {
-        const data = await episodesApi.get(episodeId, token);
+        const data = await episodesApi.get(episodeId, '');
         setEpisode(data);
       } catch (err) {
         console.error('Failed to fetch episode:', err);
@@ -39,7 +39,7 @@ export default function OverlayConfigPage() {
     };
 
     fetchEpisode();
-  }, [episodeId, token]);
+  }, [episodeId, user?.id]);
 
   const getOverlayUrl = () => {
     if (!episode) return '';

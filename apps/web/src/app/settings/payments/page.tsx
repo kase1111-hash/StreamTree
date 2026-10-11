@@ -61,7 +61,7 @@ function PaymentSettingsLoading() {
 
 function PaymentSettingsContent() {
   const searchParams = useSearchParams();
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const [settings, setSettings] = useState<PaymentSettings | null>(null);
   const [earnings, setEarnings] = useState<EarningsSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,7 +71,7 @@ function PaymentSettingsContent() {
   const [success, setSuccess] = useState('');
 
   useEffect(() => {
-    if (token) {
+    if (user) {
       loadData();
     }
 
@@ -83,15 +83,15 @@ function PaymentSettingsContent() {
     if (searchParams.get('refresh')) {
       setError('Please complete your payment account setup');
     }
-  }, [token, searchParams]);
+  }, [user?.id, searchParams]);
 
   const loadData = async () => {
-    if (!token) return;
+    if (!user) return;
 
     try {
       const [settingsData, earningsData] = await Promise.all([
-        paymentsApi.getSettings(token),
-        paymentsApi.getEarnings(token),
+        paymentsApi.getSettings(''),
+        paymentsApi.getEarnings(''),
       ]);
       setSettings(settingsData);
       setEarnings(earningsData);
@@ -102,15 +102,15 @@ function PaymentSettingsContent() {
   };
 
   const handleConnectStripe = async () => {
-    if (!token) return;
+    if (!user) return;
 
     setConnecting(true);
     setError('');
 
     try {
       const { onboardingUrl } = await paymentsApi.connectStripe(
-        `${user?.username}@streamtree.app`,
-        token
+        `${user.username}@streamtree.app`,
+        ''
       );
       window.location.href = onboardingUrl;
     } catch (err: any) {
@@ -120,14 +120,14 @@ function PaymentSettingsContent() {
   };
 
   const handleWithdraw = async (episodeId: string) => {
-    if (!token) return;
+    if (!user) return;
 
     setWithdrawing(episodeId);
     setError('');
     setSuccess('');
 
     try {
-      const result = await paymentsApi.withdraw(episodeId, token);
+      const result = await paymentsApi.withdraw(episodeId, '');
       setSuccess(`Withdrawal of $${(result.amount / 100).toFixed(2)} initiated!`);
       loadData();
     } catch (err: any) {

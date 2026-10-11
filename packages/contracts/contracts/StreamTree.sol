@@ -263,6 +263,50 @@ contract StreamTree is ERC721, ERC721URIStorage, ERC721Enumerable, Ownable, Reen
         uint256 patterns,
         string calldata metadataUri
     ) external onlyAuthorizedMinter branchExists(branchId) nonReentrant returns (uint256) {
+        return _mintFruit(branchId, finalScore, patterns, metadataUri);
+    }
+
+    /**
+     * @dev Batch mint fruits for multiple branches
+     * @param branchIds Array of branch IDs to fruit
+     * @param finalScores Array of final scores
+     * @param patternsArr Array of pattern counts
+     * @param metadataUris Array of metadata URIs
+     */
+    function batchMintFruit(
+        uint256[] calldata branchIds,
+        uint256[] calldata finalScores,
+        uint256[] calldata patternsArr,
+        string[] calldata metadataUris
+    ) external onlyAuthorizedMinter nonReentrant returns (uint256[] memory) {
+        require(
+            branchIds.length == finalScores.length &&
+            branchIds.length == patternsArr.length &&
+            branchIds.length == metadataUris.length,
+            "Array length mismatch"
+        );
+        require(branchIds.length <= 50, "Batch too large");
+
+        uint256[] memory fruitIds = new uint256[](branchIds.length);
+
+        for (uint256 i = 0; i < branchIds.length; i++) {
+            require(branches[branchIds[i]].holder != address(0), "Branch does not exist");
+            fruitIds[i] = _mintFruit(branchIds[i], finalScores[i], patternsArr[i], metadataUris[i]);
+        }
+
+        return fruitIds;
+    }
+
+    /**
+     * @dev Shared fruit minting logic. Callers must check that the branch exists.
+     * Kept separate so batchMintFruit's loop stays within the EVM stack limit.
+     */
+    function _mintFruit(
+        uint256 branchId,
+        uint256 finalScore,
+        uint256 patterns,
+        string calldata metadataUri
+    ) internal returns (uint256) {
         Branch storage branch = branches[branchId];
         require(!branch.fruited, "Branch already fruited");
 
@@ -290,65 +334,6 @@ contract StreamTree is ERC721, ERC721URIStorage, ERC721Enumerable, Ownable, Reen
         emit BranchFruited(branchId, fruitId, branch.holder, finalScore, patterns);
 
         return fruitId;
-    }
-
-    /**
-     * @dev Batch mint fruits for multiple branches
-     * @param branchIds Array of branch IDs to fruit
-     * @param finalScores Array of final scores
-     * @param patternsArr Array of pattern counts
-     * @param metadataUris Array of metadata URIs
-     */
-    function batchMintFruit(
-        uint256[] calldata branchIds,
-        uint256[] calldata finalScores,
-        uint256[] calldata patternsArr,
-        string[] calldata metadataUris
-    ) external onlyAuthorizedMinter nonReentrant returns (uint256[] memory) {
-        require(
-            branchIds.length == finalScores.length &&
-            branchIds.length == patternsArr.length &&
-            branchIds.length == metadataUris.length,
-            "Array length mismatch"
-        );
-        require(branchIds.length <= 50, "Batch too large");
-
-        uint256[] memory fruitIds = new uint256[](branchIds.length);
-
-        for (uint256 i = 0; i < branchIds.length; i++) {
-            uint256 branchId = branchIds[i];
-            Branch storage branch = branches[branchId];
-
-            require(branch.holder != address(0), "Branch does not exist");
-            require(!branch.fruited, "Branch already fruited");
-
-            Root storage root = roots[branch.rootId];
-            require(root.status == RootStatus.Ended, "Root not ended yet");
-
-            uint256 fruitId = _nextFruitId++;
-
-            fruits[fruitId] = Fruit({
-                branchId: branchId,
-                rootId: branch.rootId,
-                holder: branch.holder,
-                finalScore: finalScores[i],
-                patterns: patternsArr[i],
-                fruitedAt: block.timestamp
-            });
-
-            tokenType[fruitId] = TokenType.Fruit;
-            branchToFruit[branchId] = fruitId;
-            branch.fruited = true;
-
-            _safeMint(branch.holder, fruitId);
-            _setTokenURI(fruitId, metadataUris[i]);
-
-            emit BranchFruited(branchId, fruitId, branch.holder, finalScores[i], patternsArr[i]);
-
-            fruitIds[i] = fruitId;
-        }
-
-        return fruitIds;
     }
 
     // ============ View Functions ============

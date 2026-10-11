@@ -24,7 +24,8 @@ export function errorHandler(
   err: Error,
   req: Request,
   res: Response,
-  next: NextFunction
+  // Express identifies error handlers by arity, so this parameter must stay
+  _next: NextFunction
 ) {
   // SECURITY: Only log sanitized error message, not the full error object
   // which may contain sensitive data like tokens, request bodies, etc.

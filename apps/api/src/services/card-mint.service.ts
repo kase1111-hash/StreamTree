@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db/client.js';
 import { generateCardGrid } from '@streamtree/shared';
+import type { TriggerType, TriggerConfig } from '@streamtree/shared';
 import { withSerializableRetry } from '../utils/transaction.js';
 
 export interface MintCardParams {
@@ -49,10 +50,7 @@ export async function mintCardAtomically(
 ): Promise<MintCardResult> {
   return withSerializableRetry(() =>
     prisma.$transaction(
-      async (txRaw) => {
-        // Cast to any — Prisma 5.9's TS types don't expose $queryRaw/models
-        // on the interactive transaction client, but they are available at runtime
-        const tx = txRaw as any;
+      async (tx) => {
         // 1. Lock the episode row to serialize concurrent mints
         const episodes: any[] = await tx.$queryRaw`
           SELECT * FROM episodes WHERE id = ${params.episodeId} FOR UPDATE
@@ -117,8 +115,8 @@ export async function mintCardAtomically(
             name: e.name,
             icon: e.icon,
             description: e.description,
-            triggerType: e.triggerType as 'manual' | 'twitch' | 'custom',
-            triggerConfig: e.triggerConfig as Record<string, unknown> | null,
+            triggerType: e.triggerType as TriggerType,
+            triggerConfig: e.triggerConfig as unknown as TriggerConfig | null,
             firedAt: e.firedAt,
             firedCount: e.firedCount,
             createdAt: e.createdAt,

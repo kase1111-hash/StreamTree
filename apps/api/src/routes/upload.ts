@@ -1,4 +1,4 @@
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';

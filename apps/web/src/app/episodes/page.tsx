@@ -17,7 +17,7 @@ interface Episode {
 }
 
 export default function EpisodesPage() {
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -29,16 +29,16 @@ export default function EpisodesPage() {
   const [savingTemplate, setSavingTemplate] = useState(false);
 
   useEffect(() => {
-    if (token) {
+    if (user) {
       loadEpisodes();
     }
-  }, [token]);
+  }, [user?.id]);
 
   const loadEpisodes = async () => {
-    if (!token) return;
+    if (!user) return;
 
     try {
-      const data = await episodesApi.list(token);
+      const data = await episodesApi.list('');
       setEpisodes(data);
     } catch (err: any) {
       setError(err.message || 'Failed to load episodes');
@@ -53,7 +53,7 @@ export default function EpisodesPage() {
   };
 
   const handleSaveAsTemplate = async () => {
-    if (!savingEpisodeId || !token || !templateName.trim()) return;
+    if (!savingEpisodeId || !user || !templateName.trim()) return;
 
     setSavingTemplate(true);
     try {
@@ -63,7 +63,7 @@ export default function EpisodesPage() {
           name: templateName.trim(),
           description: templateDescription || undefined,
         },
-        token
+        ''
       );
       setSavingEpisodeId(null);
       // Show success - could use toast

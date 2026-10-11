@@ -105,7 +105,7 @@ export function setupWebSocket(server: Server): WebSocketServer {
       try {
         const message = JSON.parse(data.toString()) as ClientToServerEvent;
         handleMessage(client, message);
-      } catch (error) {
+      } catch {
         sendToClient(client, {
           type: 'error',
           message: 'Invalid message format',
@@ -201,7 +201,7 @@ function unsubscribeFromCard(client: AuthenticatedWebSocket, cardId: string) {
 async function handleMarkSquare(
   client: AuthenticatedWebSocket,
   cardId: string,
-  position: { row: number; col: number }
+  _position: { row: number; col: number }
 ) {
   if (!client.userId) {
     sendToClient(client, {
@@ -344,7 +344,7 @@ export async function broadcastStats(episodeId: string) {
     const leaderboard = leaderboardRaw
       .map((card: typeof leaderboardRaw[number]) => ({
         ...card,
-        score: calculatePatternScore(card.patterns as Pattern[]) + card.markedSquares,
+        score: calculatePatternScore(card.patterns as unknown as Pattern[]) + card.markedSquares,
       }))
       .sort((a, b) => b.score - a.score)
       .slice(0, 10);
@@ -360,7 +360,7 @@ export async function broadcastStats(episodeId: string) {
         // SECURITY: Don't expose internal user IDs - use username for display only
         username: card.holder.displayName || card.holder.username,
         markedSquares: card.markedSquares,
-        patterns: card.patterns as Pattern[],
+        patterns: card.patterns as unknown as Pattern[],
         score: card.score,
       })),
     });

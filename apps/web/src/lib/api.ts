@@ -1,3 +1,5 @@
+import type { Pattern } from '@streamtree/shared';
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
 
 // SECURITY: File upload validation constants
@@ -5,15 +7,24 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 
 // ── Response Interfaces ─────────────────────────────────────────────
+// These mirror the JSON returned by apps/api/src/routes/*. Dates arrive
+// as ISO strings.
 
 export interface UserResponse {
   id: string;
   username: string;
   displayName: string | null;
   avatarUrl: string | null;
-  role: 'viewer' | 'streamer' | 'admin';
-  walletAddress: string | null;
+  isStreamer: boolean;
+  // Omitted by custodial login
+  walletAddress?: string | null;
+}
+
+export interface UserProfileResponse extends UserResponse {
   createdAt: string;
+  lastActiveAt: string;
+  cardsCount: number;
+  episodesCount: number;
 }
 
 export interface AuthResponse {
@@ -24,78 +35,56 @@ export interface AuthResponse {
 
 export interface EpisodeEvent {
   id: string;
+  episodeId: string;
   name: string;
   icon: string;
   description: string | null;
+  triggerType: string;
+  triggerConfig: unknown;
   firedAt: string | null;
+  firedCount: number;
+  createdAt: string;
+  sortOrder: number;
 }
 
-export interface EpisodeListItem {
+export type PublicEpisodeEvent = Pick<EpisodeEvent, 'id' | 'name' | 'icon' | 'description' | 'firedAt'>;
+
+export interface EpisodeResponse {
   id: string;
+  streamerId: string;
   name: string;
   artworkUrl: string | null;
-  status: string;
+  artworkHash: string | null;
   cardPrice: number;
-  cardsMinted: number;
   maxCards: number | null;
   gridSize: number;
-  shareCode: string;
+  status: string;
   createdAt: string;
-}
-
-export interface EpisodeDetail extends EpisodeListItem {
-  events: EpisodeEvent[];
-}
-
-export interface EpisodeStats {
-  totalCards: number;
+  launchedAt: string | null;
+  endedAt: string | null;
+  cardsMinted: number;
   totalRevenue: number;
-  eventsFired: number;
-  totalEvents: number;
-  topPatterns: Array<{ type: string; count: number }>;
+  contractAddress: string | null;
+  rootTokenId: string | null;
+  shareCode: string;
 }
 
-export interface EpisodeResults {
-  episode: EpisodeDetail;
-  leaderboard: LeaderboardEntryResponse[];
-  stats: EpisodeStats;
+export interface EpisodeListItem extends EpisodeResponse {
+  cardsCount: number;
+  eventsCount: number;
 }
 
-export interface GridSquareResponse {
-  eventId: string;
-  eventName: string;
-  eventIcon: string;
-  position: { row: number; col: number };
-  marked: boolean;
-  markedAt: string | null;
+export interface EpisodeWithEvents extends EpisodeResponse {
+  eventDefinitions: EpisodeEvent[];
 }
 
-export interface PatternResponse {
-  type: 'row' | 'column' | 'diagonal' | 'blackout';
-  index?: number;
-  direction?: 'main' | 'anti';
-}
-
-export interface CardResponse {
-  id: string;
-  episodeId: string;
-  holderId: string;
-  grid: GridSquareResponse[][];
-  markedSquares: number;
-  patterns: PatternResponse[];
-  status: string;
-  createdAt: string;
-}
-
-export interface GalleryCard {
-  id: string;
-  episodeId: string;
-  episodeName: string;
-  artworkUrl: string | null;
-  markedSquares: number;
-  patterns: PatternResponse[];
-  status: string;
-  createdAt: string;
+export interface EpisodeDetail extends EpisodeWithEvents {
+  streamer: {
+    id: string;
+    username: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+  };
 }
 
 export interface LeaderboardEntryResponse {
@@ -103,73 +92,230 @@ export interface LeaderboardEntryResponse {
   cardId: string;
   username: string;
   markedSquares: number;
-  patterns: number;
+  patterns: Pattern[];
   score: number;
+}
+
+export interface PublicLeaderboardEntry extends Omit<LeaderboardEntryResponse, 'patterns'> {
+  // Public leaderboard returns the pattern count rather than the patterns
+  patterns: number;
+}
+
+export interface EpisodeStats {
+  cardsMinted: number;
+  totalRevenue: number;
+  eventsTriggered: number;
+  leaderboard: LeaderboardEntryResponse[];
+}
+
+export interface EpisodeResults {
+  id: string;
+  name: string;
+  artworkUrl: string | null;
+  status: string;
+  cardsMinted: number;
+  totalRevenue: number;
+  launchedAt: string | null;
+  endedAt: string | null;
+  streamer: {
+    id: string;
+    username: string;
+    displayName: string | null;
+  };
+  eventsFired: number;
+  totalEvents: number;
+  leaderboard: LeaderboardEntryResponse[];
+}
+
+export interface FireEventResponse {
+  firedEvent: {
+    id: string;
+    episodeId: string;
+    eventDefinitionId: string;
+    firedAt: string;
+    firedBy: string;
+    cardsAffected: number;
+    triggerData: unknown;
+  };
+  cardsAffected: number;
+}
+
+export interface GridSquareResponse {
+  eventId: string;
+  position: { row: number; col: number };
+  marked: boolean;
+  markedAt: string | null;
+}
+
+export interface CardResponse {
+  id: string;
+  episodeId: string;
+  holderId: string;
+  grid: GridSquareResponse[][];
+  status: string;
+  markedSquares: number;
+  patterns: Pattern[];
+  mintedAt: string;
+  fruitedAt: string | null;
+  paymentId: string | null;
+  pricePaid: number;
+  branchTokenId: string | null;
+  fruitTokenId: string | null;
+  cardNumber: number;
+}
+
+export interface MyCardListItem extends CardResponse {
+  episode: {
+    id: string;
+    name: string;
+    artworkUrl: string | null;
+    status: string;
+    streamer: { username: string; displayName: string | null };
+    streamerName: string;
+  };
+}
+
+export interface MyEpisodeCardResponse extends CardResponse {
+  episode: EpisodeWithEvents & {
+    streamer: { username: string; displayName: string | null };
+  };
+}
+
+export interface CardDetailResponse extends CardResponse {
+  episode: EpisodeWithEvents & {
+    streamer: {
+      id: string;
+      username: string;
+      displayName: string | null;
+      avatarUrl: string | null;
+    };
+  };
+  holder: { id: string; username: string; displayName: string | null };
+}
+
+export interface MintedCardResponse extends CardResponse {
+  episode: {
+    id: string;
+    name: string;
+    artworkUrl: string | null;
+    status: string;
+    rootTokenId: string | null;
+  };
+}
+
+export interface GalleryCard {
+  id: string;
+  episodeId: string;
+  episodeName: string;
+  artworkUrl: string | null;
+  streamerName: string;
+  cardNumber: number;
+  markedSquares: number;
+  patterns: Pattern[];
+  mintedAt: string;
+  fruitedAt: string | null;
+  fruitTokenId: string | null;
 }
 
 export interface PublicEpisodeResponse {
   id: string;
   name: string;
   artworkUrl: string | null;
-  status: string;
   cardPrice: number;
-  cardsMinted: number;
   maxCards: number | null;
   gridSize: number;
+  status: string;
+  launchedAt: string | null;
+  endedAt: string | null;
+  cardsMinted: number;
   shareCode: string;
-  isSoldOut: boolean;
-  events: EpisodeEvent[];
+  events: PublicEpisodeEvent[];
   streamer: {
+    id: string;
     username: string;
     displayName: string | null;
     avatarUrl: string | null;
   };
+  isSoldOut: boolean;
 }
 
 export interface UserStats {
-  totalCards: number;
-  totalPatterns: number;
-  episodesPlayed: number;
-  bestScore: number;
+  cardsTotal: number;
+  cardsFruited: number;
+  patternsCompleted: number;
+  episodesCreated: number;
+  episodesLive: number;
 }
 
 export interface PaymentSettings {
-  stripeConnected: boolean;
-  stripeAccountId: string | null;
+  hasStripeAccount: boolean;
+  chargesEnabled: boolean;
   payoutsEnabled: boolean;
+  detailsSubmitted: boolean;
+  platformFeePercent: number;
 }
 
 export interface EarningsSummary {
   totalEarnings: number;
+  totalWithdrawn: number;
+  pendingWithdrawals: number;
   availableBalance: number;
-  pendingBalance: number;
+  platformFeePercent: number;
   episodes: Array<{
-    episodeId: string;
-    episodeName: string;
-    earnings: number;
-    cardsSold: number;
-    withdrawn: boolean;
+    id: string;
+    name: string;
+    status: string;
+    cardsMinted: number;
+    grossRevenue: number;
+    netRevenue: number;
+    withdrawn: number;
+    pending: number;
+    available: number;
+    canWithdraw: boolean;
   }>;
+}
+
+export interface WithdrawResponse {
+  withdrawalId: string;
+  amount: number;
+  status: string;
 }
 
 export interface WithdrawalResponse {
   id: string;
+  episodeId: string;
+  episodeName: string;
   amount: number;
+  platformFee: number;
+  netAmount: number;
   status: string;
   createdAt: string;
+  completedAt: string | null;
+}
+
+export interface TemplateEvent {
+  name: string;
+  icon?: string;
+  description?: string | null;
+  triggerType?: string;
+  triggerConfig?: unknown;
 }
 
 export interface TemplateResponse {
   id: string;
+  creatorId: string;
   name: string;
   description: string | null;
-  events: Array<{ name: string; icon: string; description: string | null }>;
+  events: TemplateEvent[];
   gridSize: number;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface UploadResponse {
   url: string;
+  // Returned for artwork uploads only
+  hash?: string;
 }
 
 // ── Update / Input Interfaces ───────────────────────────────────────
@@ -184,7 +330,7 @@ export interface EpisodeUpdateData {
 export interface EventUpdateData {
   name?: string;
   icon?: string;
-  description?: string;
+  description?: string | null;
 }
 
 export interface TemplateUpdateData {
@@ -307,7 +453,7 @@ export const authApi = {
     }),
 
   becomeStreamer: (token: string) =>
-    api<{ user: UserResponse; token: string }>('/api/auth/become-streamer', {
+    api<{ user: Omit<UserResponse, 'avatarUrl' | 'walletAddress'>; token: string }>('/api/auth/become-streamer', {
       method: 'POST',
       token,
     }),
@@ -323,19 +469,19 @@ export const episodesApi = {
     api<EpisodeDetail>(`/api/episodes/${id}`, { token }),
 
   create: (data: { name: string; cardPrice?: number; maxCards?: number; gridSize?: number }, token: string) =>
-    api<EpisodeDetail>('/api/episodes', { method: 'POST', body: data, token }),
+    api<EpisodeWithEvents>('/api/episodes', { method: 'POST', body: data, token }),
 
   update: (id: string, data: EpisodeUpdateData, token: string) =>
-    api<EpisodeDetail>(`/api/episodes/${id}`, { method: 'PATCH', body: data, token }),
+    api<EpisodeWithEvents>(`/api/episodes/${id}`, { method: 'PATCH', body: data, token }),
 
   delete: (id: string, token: string) =>
     api(`/api/episodes/${id}`, { method: 'DELETE', token }),
 
   launch: (id: string, token: string) =>
-    api<EpisodeDetail>(`/api/episodes/${id}/launch`, { method: 'POST', token }),
+    api<EpisodeWithEvents>(`/api/episodes/${id}/launch`, { method: 'POST', token }),
 
   end: (id: string, token: string) =>
-    api<EpisodeDetail>(`/api/episodes/${id}/end`, { method: 'POST', token }),
+    api<EpisodeResponse>(`/api/episodes/${id}/end`, { method: 'POST', token }),
 
   getStats: (id: string, token: string) =>
     api<EpisodeStats>(`/api/episodes/${id}/stats`, { token }),
@@ -350,7 +496,7 @@ export const episodesApi = {
     api(`/api/episodes/${episodeId}/events/${eventId}`, { method: 'DELETE', token }),
 
   fireEvent: (episodeId: string, eventId: string, token: string) =>
-    api<EpisodeEvent>(`/api/episodes/${episodeId}/events/${eventId}/fire`, { method: 'POST', token }),
+    api<FireEventResponse>(`/api/episodes/${episodeId}/events/${eventId}/fire`, { method: 'POST', token }),
 
   getResults: (id: string, token?: string) =>
     api<EpisodeResults>(`/api/episodes/${id}/results`, { token }),
@@ -360,16 +506,16 @@ export const episodesApi = {
 
 export const cardsApi = {
   getMy: (token: string) =>
-    api<CardResponse[]>('/api/cards/my', { token }),
+    api<MyCardListItem[]>('/api/cards/my', { token }),
 
   getMyForEpisode: (episodeId: string, token: string) =>
-    api<CardResponse>(`/api/cards/my/${episodeId}`, { token }),
+    api<MyEpisodeCardResponse>(`/api/cards/my/${episodeId}`, { token }),
 
   get: (id: string, token: string) =>
-    api<CardResponse>(`/api/cards/${id}`, { token }),
+    api<CardDetailResponse>(`/api/cards/${id}`, { token }),
 
   mint: (episodeId: string, token: string) =>
-    api<CardResponse>(`/api/cards/mint/${episodeId}`, { method: 'POST', token }),
+    api<MintedCardResponse>(`/api/cards/mint/${episodeId}`, { method: 'POST', token }),
 
   createPaymentIntent: (episodeId: string, token: string) =>
     api<{ clientSecret: string; paymentIntentId: string; amount: number }>(
@@ -388,7 +534,7 @@ export const publicApi = {
     api<PublicEpisodeResponse>(`/api/public/episode/${shareCode}`),
 
   getLeaderboard: (shareCode: string) =>
-    api<LeaderboardEntryResponse[]>(`/api/public/episode/${shareCode}/leaderboard`),
+    api<PublicLeaderboardEntry[]>(`/api/public/episode/${shareCode}/leaderboard`),
 
   checkUsername: (username: string) =>
     api<{ available: boolean }>(`/api/public/username-available/${username}`),
@@ -398,7 +544,7 @@ export const publicApi = {
 
 export const usersApi = {
   getMe: (token: string) =>
-    api<UserResponse>('/api/users/me', { token }),
+    api<UserProfileResponse>('/api/users/me', { token }),
 
   updateMe: (data: { displayName?: string; avatarUrl?: string }, token: string) =>
     api<UserResponse>('/api/users/me', { method: 'PATCH', body: data, token }),
@@ -427,19 +573,29 @@ export const paymentsApi = {
     api<EarningsSummary>('/api/payments/earnings', { token }),
 
   withdraw: (episodeId: string, token: string) =>
-    api<WithdrawalResponse>(`/api/payments/withdraw/${episodeId}`, { method: 'POST', token }),
+    api<WithdrawResponse>(`/api/payments/withdraw/${episodeId}`, { method: 'POST', token }),
 
   getWithdrawals: (token: string) =>
     api<WithdrawalResponse[]>('/api/payments/withdrawals', { token }),
 
   createPaymentIntent: (episodeId: string, token: string) =>
-    api<{ clientSecret: string }>(`/api/cards/mint/${episodeId}/payment`, {
+    api<{ clientSecret: string; paymentIntentId: string; amount: number }>(`/api/cards/mint/${episodeId}/payment`, {
       method: 'POST',
       token,
     }),
 };
 
 // ── Upload ───────────────────────────────────────────────────────────
+
+// Multipart uploads can't use the JSON content type that satisfies the API's
+// CSRF check, so mark them as script-initiated with X-Requested-With instead.
+function uploadHeaders(token: string): Record<string, string> {
+  const headers: Record<string, string> = { 'X-Requested-With': 'XMLHttpRequest' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
 
 export const uploadApi = {
   uploadArtwork: async (file: File, episodeId: string, token: string) => {
@@ -452,9 +608,7 @@ export const uploadApi = {
 
     const response = await fetch(`${API_URL}/api/upload/artwork`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: uploadHeaders(token),
       body: formData,
       // SECURITY: Include credentials for HttpOnly cookies
       credentials: 'include',
@@ -482,9 +636,7 @@ export const uploadApi = {
 
     const response = await fetch(`${API_URL}/api/upload/avatar`, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: uploadHeaders(token),
       body: formData,
       // SECURITY: Include credentials for HttpOnly cookies
       credentials: 'include',
@@ -534,7 +686,7 @@ export const templatesApi = {
     api(`/api/templates/${id}`, { method: 'DELETE', token }),
 
   use: (id: string, data: { episodeName?: string; cardPrice?: number; maxCards?: number }, token: string) =>
-    api<EpisodeDetail>(`/api/templates/${id}/use`, { method: 'POST', body: data, token }),
+    api<EpisodeWithEvents>(`/api/templates/${id}/use`, { method: 'POST', body: data, token }),
 
   fromEpisode: (
     episodeId: string,

@@ -46,7 +46,7 @@ function CreateEpisodeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const templateId = searchParams.get('template');
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const [step, setStep] = useState<'info' | 'events'>('info');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -67,15 +67,15 @@ function CreateEpisodeContent() {
 
   // Load template if specified
   useEffect(() => {
-    if (templateId && token) {
+    if (templateId && user) {
       loadTemplate(templateId);
     }
-  }, [templateId, token]);
+  }, [templateId, user?.id]);
 
   const loadTemplate = async (id: string) => {
-    if (!token) return;
+    if (!user) return;
     try {
-      const template = await templatesApi.get(id, token);
+      const template = await templatesApi.get(id, '');
       setSelectedTemplate(template);
       setName(template.name);
       setGridSize(template.gridSize);
@@ -85,10 +85,10 @@ function CreateEpisodeContent() {
   };
 
   const fetchTemplates = async () => {
-    if (!token) return;
+    if (!user) return;
     setLoadingTemplates(true);
     try {
-      const data = await templatesApi.getMy(token);
+      const data = await templatesApi.getMy('');
       setTemplates(data);
     } catch (err) {
       console.error('Failed to load templates:', err);
@@ -135,7 +135,7 @@ function CreateEpisodeContent() {
   }
 
   // Not logged in
-  if (!user || !token) {
+  if (!user) {
     return (
       <div className="min-h-[80vh] flex items-center justify-center px-4">
         <div className="text-center">
@@ -167,7 +167,7 @@ function CreateEpisodeContent() {
     try {
       const episode = await episodesApi.create(
         { name: name.trim(), gridSize },
-        token
+        ''
       );
       setEpisodeId(episode.id);
 
@@ -180,7 +180,7 @@ function CreateEpisodeContent() {
               name: templateEvent.name,
               icon: templateEvent.icon || '🎯',
               description: templateEvent.description,
-            }, token);
+            }, '');
             addedEvents.push(newEvent);
           } catch (err) {
             console.error('Failed to add event from template:', err);
@@ -198,10 +198,10 @@ function CreateEpisodeContent() {
   };
 
   const handleAddEvent = async (event: { name: string; icon: string; description?: string }) => {
-    if (!episodeId || !token) return;
+    if (!episodeId || !user) return;
 
     try {
-      const newEvent = await episodesApi.addEvent(episodeId, event, token);
+      const newEvent = await episodesApi.addEvent(episodeId, event, '');
       setEvents([...events, newEvent]);
     } catch (err: any) {
       setError(err.message || 'Failed to add event');
@@ -209,10 +209,10 @@ function CreateEpisodeContent() {
   };
 
   const handleRemoveEvent = async (eventId: string) => {
-    if (!episodeId || !token) return;
+    if (!episodeId || !user) return;
 
     try {
-      await episodesApi.deleteEvent(episodeId, eventId, token);
+      await episodesApi.deleteEvent(episodeId, eventId, '');
       setEvents(events.filter((e) => e.id !== eventId));
     } catch (err: any) {
       setError(err.message || 'Failed to remove event');
@@ -220,10 +220,10 @@ function CreateEpisodeContent() {
   };
 
   const handleUpdateEvent = async (eventId: string, data: Partial<EventDef>) => {
-    if (!episodeId || !token) return;
+    if (!episodeId || !user) return;
 
     try {
-      const updated = await episodesApi.updateEvent(episodeId, eventId, data, token);
+      const updated = await episodesApi.updateEvent(episodeId, eventId, data, '');
       setEvents(events.map((e) => (e.id === eventId ? { ...e, ...updated } : e)));
     } catch (err: any) {
       setError(err.message || 'Failed to update event');
@@ -231,7 +231,7 @@ function CreateEpisodeContent() {
   };
 
   const handleLaunch = async () => {
-    if (!episodeId || !token) return;
+    if (!episodeId || !user) return;
 
     if (events.length === 0) {
       setError('Add at least one event before launching');
@@ -242,7 +242,7 @@ function CreateEpisodeContent() {
     setError('');
 
     try {
-      await episodesApi.launch(episodeId, token);
+      await episodesApi.launch(episodeId, '');
       router.push(`/dashboard/${episodeId}`);
     } catch (err: any) {
       setError(err.message || 'Failed to launch episode');

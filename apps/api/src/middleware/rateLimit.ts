@@ -5,7 +5,6 @@
  */
 
 import rateLimit from 'express-rate-limit';
-import { AppError } from './error.js';
 
 /**
  * Strict rate limiter for authentication endpoints
@@ -24,6 +23,10 @@ export const authRateLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in headers
   legacyHeaders: false, // Disable X-RateLimit-* headers
   skipSuccessfulRequests: false, // Count all requests
+  // GET /me is the read-only session check the web app makes on every page
+  // load; counting it here locks signed-in users out after a few reloads.
+  // It remains covered by the global apiRateLimiter.
+  skip: (req) => req.method === 'GET' && req.path === '/me',
   handler: (req, res, next, options) => {
     res.status(429).json(options.message);
   },

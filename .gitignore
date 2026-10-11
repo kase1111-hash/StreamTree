@@ -37,6 +37,14 @@ Thumbs.db
 # Turbo
 .turbo/
 
+# Hardhat
+packages/contracts/artifacts/
+packages/contracts/cache/
+packages/contracts/typechain-types/
+
+# Local upload storage (used when S3 isn't configured)
+apps/api/uploads/
+
 # Database
 *.db
 *.sqlite

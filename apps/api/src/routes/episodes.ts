@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db/client.js';
 import { AppError } from '../middleware/error.js';
 import { AuthenticatedRequest, requireStreamer } from '../middleware/auth.js';
@@ -795,7 +796,7 @@ router.post('/:id/events/:eventId/fire', requireStreamer, async (req: Authentica
           data: {
             grid,
             markedSquares: markedCount,
-            patterns,
+            patterns: patterns as unknown as Prisma.InputJsonValue,
           },
         });
 

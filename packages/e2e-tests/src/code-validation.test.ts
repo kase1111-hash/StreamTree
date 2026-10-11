@@ -159,10 +159,15 @@ describe('Code Validation', () => {
     it('should handle paid card creation in Stripe webhook', () => {
       const webhooksPath = join(API_ROOT, 'src/routes/webhooks.ts');
       const webhooks = readFileSync(webhooksPath, 'utf-8');
+      const mintServicePath = join(API_ROOT, 'src/services/card-mint.service.ts');
+      const mintService = readFileSync(mintServicePath, 'utf-8');
 
-      // Should mark already-fired events on new cards
-      expect(webhooks).toContain('firedEventIds');
-      expect(webhooks).toContain('markedCount');
+      // Should mint through the shared atomic mint service
+      expect(webhooks).toContain('mintCardAtomically');
+
+      // Mint service should mark already-fired events on new cards
+      expect(mintService).toContain('firedEventIds');
+      expect(mintService).toContain('markedCount');
 
       // Should update pending payment status
       expect(webhooks).toContain('pendingPayment.updateMany');
@@ -207,6 +212,18 @@ describe('Code Validation', () => {
       // Should have waiting state for webhook card creation
       expect(play).toContain('waitingForCard');
       expect(play).toContain('Payment received');
+    });
+  });
+
+  describe('Uploads', () => {
+    it('should mark multipart uploads as script-initiated for CSRF', () => {
+      const apiPath = join(WEB_ROOT, 'src/lib/api.ts');
+      const api = readFileSync(apiPath, 'utf-8');
+
+      // Multipart bodies can't use the JSON content type the API's CSRF check
+      // accepts, so both upload calls must send X-Requested-With instead
+      expect(api).toContain("'X-Requested-With': 'XMLHttpRequest'");
+      expect(api.match(/headers: uploadHeaders\(/g)?.length).toBe(2);
     });
   });
 
